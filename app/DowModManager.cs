@@ -172,6 +172,7 @@ namespace DowModManager
         CheckBox chkWs, chkZoom, chkRus, chkWasd;
         RadioButton radCustom, radHard;
         Button btnApply, btnPlay, btnRestore;
+        ToolTip tip;
         bool busy;
 
         public MainForm()
@@ -201,12 +202,14 @@ namespace DowModManager
         void BuildUi()
         {
             Text = "Dawn of War — Mod Manager";
-            Size = new Size(688, 792);
+            Size = new Size(688, 836);
             FormBorderStyle = FormBorderStyle.FixedDialog;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Segoe UI", 9f);
             BackColor = Color.FromArgb(245, 246, 248);
+
+            tip = new ToolTip { AutoPopDelay = 20000, InitialDelay = 350, ReshowDelay = 100, ShowAlways = true };
 
             var header = new Panel { Location = new Point(0, 0), Size = new Size(688, 54), BackColor = Color.FromArgb(28, 32, 38) };
             var title = new Label
@@ -244,8 +247,15 @@ namespace DowModManager
             y += 92;
 
             // --- Widescreen + UI ---
-            var grpWs = Group("Widescreen-отрисовка + нерастянутый UI (единый комплект)", 12, y, 660, 132);
+            var grpWs = Group("Widescreen-отрисовка + нерастянутый UI (единый комплект)", 12, y, 660, 176);
             chkWs = new CheckBox { Text = "Включить отрисовку под разрешение (UI ставится автоматически)", Location = new Point(14, 24), Size = new Size(620, 22), Checked = S.Widescreen };
+            tip.SetToolTip(chkWs,
+                "Расширяет обзор под ваш экран (честный FOV, не растяжение) и ставит нерастянутый UI.\r\n" +
+                "Панели HUD не тянутся на всю ширину, а делятся и разъезжаются по углам экрана:\r\n" +
+                "  • мини-карта и ресурсы — в левый нижний угол;\r\n" +
+                "  • панель выбора отряда, команды и кнопки меню — в правый нижний угол;\r\n" +
+                "  • центр экрана остаётся открытым — там виден 3D-мир.\r\n" +
+                "Отрисовка и UI работают только вместе: выключение снимает и UI-мод.");
             var lblRes = new Label { Text = "Разрешение:", Location = new Point(14, 54), AutoSize = true };
             cmbRes = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(110, 50), Size = new Size(130, 24) };
             cmbRes.Items.AddRange(new object[] { "3440x1440", "2560x1080", "3840x1600", "5120x1440", "2560x1440", "1920x1080", "другое" });
@@ -263,20 +273,41 @@ namespace DowModManager
             cmbExe = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(452, 74), Size = new Size(192, 24) };
             cmbExe.Items.AddRange(new object[] { "skip", "compromise", "full" });
             cmbExe.SelectedItem = new[] { "skip", "compromise", "full" }.Contains(S.ExeMode) ? S.ExeMode : "skip";
+            tip.SetToolTip(cmbExe,
+                "Как патчить константу соотношения в W40k.exe — влияет на мини-карту:\r\n" +
+                "  • skip (рекомендуется) — exe не трогаем. 3D-мир корректный; квадратность\r\n" +
+                "    мини-карты и так чинит UI-мод через разметку. Начинайте с этого.\r\n" +
+                "  • compromise — в exe пишется 1.25: помогает мини-карте у части версий,\r\n" +
+                "    но искажает главное меню (в самом бою нормально).\r\n" +
+                "  • full — в exe полное соотношение: у кого-то мини-карта ок, но 3D-мир\r\n" +
+                "    может растянуться. Крайний вариант.");
             var lblTex = new Label { Text = "Текстуры баров:", Location = new Point(14, 88), AutoSize = true };
             radCustom = new RadioButton { Text = "дорисованные", Location = new Point(130, 86), Size = new Size(140, 22), Checked = S.TexturesCustom };
             radHard = new RadioButton { Text = "жёсткая обрезка", Location = new Point(280, 86), Size = new Size(160, 22), Checked = !S.TexturesCustom };
-            var note = new Label { Text = "Выключение отрисовки убирает и UI-мод — порознь они не работают.", Location = new Point(14, 110), Size = new Size(630, 18), ForeColor = Color.DimGray };
-            grpWs.Controls.AddRange(new Control[] { chkWs, lblRes, cmbRes, numW, lblX, numH, lblExe, cmbExe, lblTex, radCustom, radHard, note });
+            tip.SetToolTip(radCustom,
+                "Фоны панелей берутся из ui-unstretch\\textures-custom (ваш перерисованный арт\r\n" +
+                "с плавными/аккуратными краями) и подгоняются под гнёзда кнопок. Мягкий стык.");
+            tip.SetToolTip(radHard,
+                "Стандартная текстура из архива режется по границам зон и раздвигается.\r\n" +
+                "Быстро и без ручной работы, но на местах разреза виден резкий обрыв картинки.");
+            var note1 = new Label { Text = "UI-панели делятся и разъезжаются по углам: мини-карта — слева, команды и меню — справа, в центре — 3D-мир.", Location = new Point(14, 116), Size = new Size(636, 18), ForeColor = Color.DimGray };
+            var note2 = new Label { Text = "«Дорисованные» — ваш арт с плавным краем; «жёсткая обрезка» — резкий обрыв на стыке. Выкл. отрисовку — UI-мод снимается.", Location = new Point(14, 136), Size = new Size(636, 32), ForeColor = Color.DimGray };
+            grpWs.Controls.AddRange(new Control[] { chkWs, lblRes, cmbRes, numW, lblX, numH, lblExe, cmbExe, lblTex, radCustom, radHard, note1, note2 });
             Controls.Add(grpWs);
             chkWs.CheckedChanged += (s, e) => ToggleWs();
-            y += 140;
+            y += 184;
 
             // --- Камера ---
             var grpCam = Group("Камера", 12, y, 660, 84);
             chkZoom = new CheckBox { Text = "Улучшенный зум (отвод колёсиком дальше), DistMax:", Location = new Point(14, 24), Size = new Size(340, 22), Checked = S.Zoom };
             numDist = new NumericUpDown { Minimum = 38, Maximum = 300, Value = S.DistMax, Location = new Point(360, 22), Size = new Size(80, 24) };
             chkWasd = new CheckBox { Text = "WASD-камера (Scroll Lock ВКЛ = камера, ВЫКЛ = обычные хоткеи)", Location = new Point(14, 52), Size = new Size(620, 22), Checked = S.Wasd };
+            tip.SetToolTip(chkZoom, "Отодвигает максимальный отвод камеры колёсиком (DistMax; оригинал 38).\r\nТребует включённой «Full 3D Camera» в настройках графики игры.");
+            tip.SetToolTip(chkWasd,
+                "В движке DoW1 клавиши камеры не переназначаются, поэтому включается перехватчик:\r\n" +
+                "Scroll Lock ВКЛ — W/A/S/D двигают камеру (лампочка на клавиатуре = режим включён);\r\n" +
+                "Scroll Lock ВЫКЛ — те же клавиши работают как обычные хоткеи (A = attack-move и т.д.).\r\n" +
+                "Действует только в окне игры, закрывается вместе с ней.");
             grpCam.Controls.AddRange(new Control[] { chkZoom, numDist, chkWasd });
             Controls.Add(grpCam);
             y += 92;
@@ -284,6 +315,10 @@ namespace DowModManager
             // --- Язык ---
             var grpLang = Group("Язык", 12, y, 660, 54);
             chkRus = new CheckBox { Text = "Русский язык ([lang:russian] в W40k.ini; локализация должна быть установлена)", Location = new Point(14, 22), Size = new Size(630, 22), Checked = S.Russian };
+            tip.SetToolTip(chkRus,
+                "Прописывает строку [lang:russian] в W40k.ini (с резервной копией).\r\n" +
+                "Сами русские файлы должны быть в игре (Locale\\Russian) — иначе выберите\r\n" +
+                "русский язык в свойствах игры в Steam, чтобы Steam их докачал.");
             grpLang.Controls.Add(chkRus);
             Controls.Add(grpLang);
             y += 64;
@@ -303,7 +338,7 @@ namespace DowModManager
             log = new TextBox
             {
                 Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
-                Location = new Point(12, y), Size = new Size(660, 752 - y),
+                Location = new Point(12, y), Size = new Size(660, 796 - y),
                 Font = new Font("Consolas", 8.5f), BackColor = Color.FromArgb(24, 26, 30), ForeColor = Color.Gainsboro
             };
             Controls.Add(log);
