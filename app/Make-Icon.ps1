@@ -14,7 +14,10 @@
 param(
     [Parameter(Mandatory=$true)][string]$Source,
     [switch]$IconOnly,
-    [switch]$HeaderOnly
+    [switch]$HeaderOnly,
+    # какую часть картинки по вертикали ставить в центр полосы шапки:
+    # 0 — верх, 0.5 — середина, 1 — низ (для портрета ~0.45 = глаза)
+    [double]$HeaderFocus = 0.45
 )
 
 $ErrorActionPreference = 'Stop'
@@ -75,17 +78,18 @@ if (-not $HeaderOnly) {
 
 # ---------- header.png (широкая картинка шапки) ----------
 if (-not $IconOnly) {
-    $hw = 688; $hh = 64
+    $hw = 688; $hh = 84
     $bmp = New-Object System.Drawing.Bitmap($hw, $hh, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    # вырезаем из центра исходника полосу с пропорциями шапки
+    # вырезаем из исходника полосу с пропорциями шапки, центрируя её на -HeaderFocus
     $ratio = $hw / $hh
     $cw = $src.Width; $ch = [int]($src.Width / $ratio)
     if ($ch -gt $src.Height) { $ch = $src.Height; $cw = [int]($src.Height * $ratio) }
     $sx = [int](($src.Width - $cw) / 2)
-    $sy = [int](($src.Height - $ch) / 3)   # чуть выше центра: лица обычно в верхней трети
+    $sy = [int]($src.Height * $HeaderFocus - $ch / 2)
     if ($sy -lt 0) { $sy = 0 }
+    if ($sy + $ch -gt $src.Height) { $sy = $src.Height - $ch }
     $srcRect  = New-Object System.Drawing.Rectangle($sx, $sy, $cw, $ch)
     $destRect = New-Object System.Drawing.Rectangle(0, 0, $hw, $hh)
     $g.DrawImage($src, $destRect, $srcRect, [System.Drawing.GraphicsUnit]::Pixel)

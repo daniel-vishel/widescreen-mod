@@ -324,7 +324,7 @@ namespace DowModManager
             "    может растянуться. Крайний вариант.";
 
         public const string Textures =
-            "Текстуры баров:\r\n" +
+            "Текстуры нижней панели управления:\r\n" +
             "\r\n" +
             "  • дорисованные — сторонние текстуры с плавным/аккуратным краем\r\n" +
             "    (лежат в ui-unstretch\\textures-custom; на данный момент реализованы\r\n" +
@@ -376,7 +376,7 @@ namespace DowModManager
         Panel header;
         ToolTip tip;
         List<HelpDot> dots = new List<HelpDot>();
-        bool busy, loading, logVisible = true;
+        bool busy, loading, logVisible = false, gameFound;
         int formHeightWithLog, formHeightNoLog;
 
         public MainForm()
@@ -422,7 +422,7 @@ namespace DowModManager
             tip = new ToolTip { AutoPopDelay = 32000, InitialDelay = 250, ReshowDelay = 80, ShowAlways = true };
 
             // --- Шапка: картинка app\header.png, иначе текст ---
-            header = new Panel { Location = new Point(0, 0), Size = new Size(688, 64), BackColor = th.PanelBg };
+            header = new Panel { Location = new Point(0, 0), Size = new Size(688, 84), BackColor = th.PanelBg };
             string hdrImg = Path.Combine(root, @"app\header.png");
             if (File.Exists(hdrImg))
             {
@@ -442,7 +442,7 @@ namespace DowModManager
             else AddHeaderText();
             Controls.Add(header);
 
-            int y = 76;
+            int y = 96;
 
             // --- Игра ---
             var grpGame = Group("Игра", 12, y, 660, 84);
@@ -470,9 +470,9 @@ namespace DowModManager
 
             // --- Widescreen + UI ---
             var grpWs = Group("Widescreen-отрисовка + нерастянутый UI (единый комплект)", 12, y, 660, 122);
-            chkWs = Check("Включить отрисовку под разрешение (UI ставится автоматически)", 14, 24, 560);
+            chkWs = Check("Включить отрисовку под разрешение (UI ставится автоматически)", 14, 24, 0);
             chkWs.Checked = S.Widescreen;
-            var dotWs = Dot(580, 26, Help.Widescreen);
+            var dotWs = DotAfter(chkWs, Help.Widescreen);
             chkWs.CheckedChanged += (s, e) => { ToggleWs(); if (!loading) MarkDirty(); };
 
             var lblRes = Lbl("Разрешение:", 14, 56);
@@ -491,44 +491,45 @@ namespace DowModManager
             numH.ValueChanged += (s, e) => { if (!loading) MarkDirty(); };
 
             var lblExe = Lbl("Мини-карта (exe):", 452, 56);
+            var dotExe = DotAfter(lblExe, Help.ExeMode);
             cmbExe = Combo(452, 76, 170, new object[] { "skip", "compromise", "full" });
             cmbExe.SelectedItem = new[] { "skip", "compromise", "full" }.Contains(S.ExeMode) ? S.ExeMode : "skip";
             cmbExe.SelectedIndexChanged += (s, e) => { if (!loading) MarkDirty(); };
-            var dotExe = Dot(628, 79, Help.ExeMode);
 
-            var lblTex = Lbl("Текстуры баров:", 14, 90);
-            radCustom = Radio("дорисованные", 130, 88, 140);
-            radHard = Radio("жёсткая обрезка", 280, 88, 150);
+            var lblTex = Lbl("Нижняя панель управления:", 14, 90);
+            var dotTex = DotAfter(lblTex, Help.Textures);
+            radCustom = Radio("дорисованные", 214, 88, 130);
+            radHard = Radio("жёсткая обрезка", 350, 88, 150);
             radCustom.Checked = S.TexturesCustom; radHard.Checked = !S.TexturesCustom;
             radCustom.CheckedChanged += (s, e) => { if (!loading) MarkDirty(); };
-            var dotTex = Dot(432, 91, Help.Textures);
 
             grpWs.Controls.AddRange(new Control[] { chkWs, dotWs, lblRes, cmbRes, numW, lblX, numH,
-                lblExe, cmbExe, dotExe, lblTex, radCustom, radHard, dotTex });
+                lblExe, dotExe, cmbExe, lblTex, dotTex, radCustom, radHard });
             Controls.Add(grpWs);
             y += 130;
 
             // --- Камера ---
             var grpCam = Group("Камера", 12, y, 660, 56);
-            chkZoom = Check("Улучшенный зум (отвод колёсиком дальше), DistMax:", 14, 24, 330);
+            chkZoom = Check("Улучшенный зум (отвод колёсиком дальше)", 14, 24, 0);
             chkZoom.Checked = S.Zoom;
             chkZoom.CheckedChanged += (s, e) => { numDist.Enabled = chkZoom.Checked; if (!loading) MarkDirty(); };
-            numDist = Num(350, 22, 80, 38, 300, S.DistMax);
+            var dotZoom = DotAfter(chkZoom, Help.Zoom);
+            var lblDist = Lbl("DistMax:", 320, 26);
+            numDist = Num(380, 22, 80, 38, 300, S.DistMax);
             numDist.ValueChanged += (s, e) => { if (!loading) MarkDirty(); };
-            var dotZoom = Dot(440, 26, Help.Zoom);
-            grpCam.Controls.AddRange(new Control[] { chkZoom, numDist, dotZoom });
+            grpCam.Controls.AddRange(new Control[] { chkZoom, dotZoom, lblDist, numDist });
             Controls.Add(grpCam);
             y += 64;
 
             // --- Язык ---
             var grpLang = Group("Язык", 12, y, 660, 88);
-            chkRus = Check("Русский язык", 14, 22, 130);
+            chkRus = Check("Русский язык", 14, 22, 0);
             chkRus.Checked = S.Russian;
             chkRus.CheckedChanged += (s, e) => { UpdateRusUi(); if (!loading) MarkDirty(); };
-            var dotRus = Dot(150, 24, Help.Russian);
-            lblRusState = Lbl("", 180, 24);
+            var dotRus = DotAfter(chkRus, Help.Russian);
+            lblRusState = Lbl("", 190, 24);
             lblRusState.AutoSize = false;
-            lblRusState.Size = new Size(460, 18);
+            lblRusState.Size = new Size(450, 18);
             txtRus = Input(14, 52, 470);
             txtRus.ReadOnly = true;
             tip.SetToolTip(txtRus, "Архив русификатора (zip/rar/7z), скачанный по ссылкам из README.\r\nБудет распакован в папку игры при нажатии «Применить».");
@@ -551,6 +552,8 @@ namespace DowModManager
             btnPlay = Btn("Применить и играть", 160, y, 180, 34, (s, e) => Run("launch"));
             btnPlay.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
             btnPlay.FlatStyle = FlatStyle.Flat;
+            // акцентная кнопка не сереет сама — красим по состоянию
+            btnPlay.EnabledChanged += (s, e) => StylePlayButton();
             btnDefaults = Btn("По умолчанию", 388, y, 140, 34, (s, e) => ResetToDefaults());
             tip.SetToolTip(btnDefaults, "Вернуть параметры окна к рекомендуемым значениям\r\n(3440×1440, widescreen+UI, дорисованные текстуры, зум 76, exe: skip).\r\nНа игру это не влияет, пока не нажать «Применить».");
             btnRestore = Btn("Откат", 536, y, 136, 34, (s, e) => Run("restore"));
@@ -578,7 +581,10 @@ namespace DowModManager
 
             formHeightWithLog = y + 220 + 48;
             formHeightNoLog = y + 12 + 48;
-            Height = formHeightWithLog;
+            // лог по умолчанию скрыт
+            log.Visible = false;
+            btnLogToggle.Text = "Показать лог ▼";
+            Height = formHeightNoLog;
 
             ToggleWs();
             numDist.Enabled = chkZoom.Checked;
@@ -619,11 +625,28 @@ namespace DowModManager
         }
         Label Lbl(string text, int x, int y)
         {
-            return new Label { Text = text, Location = new Point(x, y), AutoSize = true, ForeColor = th.Fg };
+            var l = new Label { Text = text, Location = new Point(x, y), ForeColor = th.Fg, Font = Font, AutoSize = false };
+            l.Size = new Size(TextWidth(l) + 2, 17);
+            return l;
         }
         CheckBox Check(string text, int x, int y, int w)
         {
-            return new CheckBox { Text = text, Location = new Point(x, y), Size = new Size(w, 22), ForeColor = th.Fg };
+            var c = new CheckBox { Text = text, Location = new Point(x, y), ForeColor = th.Fg, Font = Font };
+            if (w > 0) c.Size = new Size(w, 22);
+            else c.Size = new Size(TextWidth(c) + 22, 22);
+            return c;
+        }
+        // Ширина текста контрола в его шрифте
+        int TextWidth(Control c)
+        {
+            return TextRenderer.MeasureText(c.Text, c.Font).Width;
+        }
+        // «?» вплотную к названию параметра (единый отступ), по центру по вертикали
+        HelpDot DotAfter(Control c, string help)
+        {
+            int right = c.Left + c.Width;
+            int cy = c.Top + (c.Height - 18) / 2;
+            return Dot(right + 8, cy, help);
         }
         RadioButton Radio(string text, int x, int y, int w)
         {
@@ -650,15 +673,29 @@ namespace DowModManager
             return d;
         }
 
+        void StylePlayButton()
+        {
+            if (btnPlay.Enabled)
+            {
+                btnPlay.BackColor = th.Accent;
+                btnPlay.ForeColor = th.AccentFg;
+                btnPlay.FlatAppearance.BorderColor = th.Accent;
+            }
+            else
+            {
+                btnPlay.BackColor = th.Dark ? Color.FromArgb(55, 58, 64) : Color.FromArgb(205, 208, 214);
+                btnPlay.ForeColor = th.Muted;
+                btnPlay.FlatAppearance.BorderColor = th.Border;
+            }
+        }
+
         void ApplyTheme()
         {
             BackColor = th.Bg;
             ForeColor = th.Fg;
             header.BackColor = th.PanelBg;
             foreach (var d in dots) d.SetTheme(th);
-            btnPlay.BackColor = th.Accent;
-            btnPlay.ForeColor = th.AccentFg;
-            btnPlay.FlatAppearance.BorderColor = th.Accent;
+            StylePlayButton();
             log.BackColor = th.LogBg;
             log.ForeColor = th.LogFg;
             lblStatus.ForeColor = th.Muted;
@@ -726,20 +763,40 @@ namespace DowModManager
         void MarkDirty()
         {
             SyncFromUi();
+            if (!gameFound) { CheckGameInstalled(); return; }
             bool dirty = !S.SameAs(applied);
             if (chkRus.Checked && !status.LocaleRussian && !string.IsNullOrEmpty(rusArchive)) dirty = true;
             btnApply.Enabled = dirty && !busy;
-            btnPlay.Enabled = !busy;   // играть можно всегда
+            btnPlay.Enabled = dirty && !busy;
+            lblStatus.ForeColor = th.Muted;
             lblStatus.Text = dirty ? "Есть несохранённые изменения — нажмите «Применить»."
                                    : "Настройки совпадают с тем, что установлено в игре.";
         }
 
-        void RefreshStatus()
+        // Игра установлена? От этого зависит, доступны ли настройки вообще.
+        bool CheckGameInstalled()
         {
             string gp = txtPath.Text.Trim();
-            if (!File.Exists(Path.Combine(gp, "W40k.exe")))
+            gameFound = !string.IsNullOrEmpty(gp) && File.Exists(Path.Combine(gp, "W40k.exe"));
+            foreach (Control c in Controls)
+                if (c is GroupBox && c.Text != "Игра") c.Enabled = gameFound;
+            btnApply.Enabled = btnPlay.Enabled = btnRestore.Enabled = gameFound && !busy;
+            if (!gameFound)
             {
-                lblStatus.Text = "Папка игры не найдена — укажите её.";
+                lblStatus.ForeColor = Color.FromArgb(200, 80, 60);
+                lblStatus.Text = string.IsNullOrEmpty(gp)
+                    ? "Игра не найдена — укажите папку с W40k.exe."
+                    : "В этой папке нет W40k.exe — игра не установлена или путь неверный.";
+            }
+            else lblStatus.ForeColor = th.Muted;
+            return gameFound;
+        }
+
+        void RefreshStatus()
+        {
+            if (!CheckGameInstalled())
+            {
+                Log("[!] " + lblStatus.Text);
                 return;
             }
             Log("Определяю текущее состояние игры…");
@@ -831,12 +888,14 @@ namespace DowModManager
         void SetBusy(bool b)
         {
             busy = b;
-            btnApply.Enabled = !b && btnApply.Enabled;
-            btnPlay.Enabled = !b;
-            btnRestore.Enabled = !b;
+            if (b) { btnApply.Enabled = btnPlay.Enabled = btnRestore.Enabled = false; }
             btnDefaults.Enabled = !b;
             Cursor = b ? Cursors.WaitCursor : Cursors.Default;
-            if (!b) MarkDirty();
+            if (!b)
+            {
+                btnRestore.Enabled = gameFound;
+                MarkDirty();
+            }
         }
 
         // ---------- Запуск бэкенда ----------
