@@ -6,3 +6,5 @@ ui-unstretch/textures-custom/
 launcher-settings.json
 DoW-ModManager.exe
 app/*.pdb
+app/app.ico
+app/header.png

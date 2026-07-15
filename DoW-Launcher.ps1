@@ -1,37 +1,41 @@
 ﻿# ============================================================
-#  Dawn of War (Anniversary Edition) - Mod Launcher
-#  Одно окно для всех модов репозитория: включение/выключение без
-#  запуска отдельных скриптов. Настройки хранятся в
-#  launcher-settings.json рядом со скриптом.
+#  Dawn of War (Anniversary Edition) - Mod Backend
+#  Бэкенд для графического менеджера (DoW-ModManager.exe) и
+#  консольного использования. Настройки — launcher-settings.json.
+#
+#  ВАЖНО: widescreen ставится ДИСКОВЫМ патчем (файлы игры правятся
+#  с полным бэкапом в <игра>\_widescreen_backup). Благодаря этому
+#  после «Применить» игра запускается ОБЫЧНЫМ способом из Steam —
+#  никакой лаунчер при запуске больше не нужен.
 #
 #  Возможности:
 #   - выбор папки с игрой (автопоиск или вручную);
-#   - widescreen-отрисовка под заданное разрешение; нерастянутый UI
-#     ставится В КОМПЛЕКТЕ (отключается только вместе с отрисовкой);
-#   - переключение текстур баров: дорисованные (textures-custom) /
-#     жёсткая обрезка (стандартная нарезка из архива);
-#   - улучшенный зум (отвод камеры, DistMax);
-#   - русский язык ([lang:russian] в W40k.ini);
-#   - WASD-камера (перехват клавиш, режим по Scroll Lock);
-#   - полный откат всех модов.
+#   - widescreen под заданное разрешение + нерастянутый UI (комплект);
+#   - текстуры баров: дорисованные (textures-custom) / жёсткая обрезка;
+#   - улучшенный зум (DistMax);
+#   - русский язык (установка русификатора из архива + [lang:russian]);
+#   - определение уже применённых изменений (-Status);
+#   - полный откат.
 #
-#  Запуск:  .\DoW-Launcher.ps1              — окно настроек
-#  Без GUI: .\DoW-Launcher.ps1 -Apply       — применить сохранённые настройки
-#           .\DoW-Launcher.ps1 -Launch      — применить и запустить игру
-#           .\DoW-Launcher.ps1 -RestoreAll  — полный откат
+#  Режимы:
+#    .\DoW-Launcher.ps1 -Status       — JSON с текущим состоянием игры
+#    .\DoW-Launcher.ps1 -Apply        — применить настройки
+#    .\DoW-Launcher.ps1 -Launch       — применить и запустить игру
+#    .\DoW-Launcher.ps1 -RestoreAll   — полный откат
 # ============================================================
 
 param(
     [switch]$Apply,
     [switch]$Launch,
     [switch]$RestoreAll,
-    [string]$GamePath = ''
+    [switch]$Status,
+    [string]$GamePath = '',
+    [string]$RussianArchive = ''   # архив русификатора (zip/rar/7z) для установки
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $cfgPath = Join-Path $root 'launcher-settings.json'
-$IsCli = $Apply -or $Launch -or $RestoreAll
 
 # ---------- Настройки ----------
 $S = [ordered]@{
@@ -39,12 +43,11 @@ $S = [ordered]@{
     Game           = 'W40k'   # W40k | WA
     Width          = 3440
     Height         = 1440
-    Widescreen     = $true    # отрисовка + UI (единый комплект)
+    Widescreen     = $true    # патч отрисовки + UI (единый комплект)
     TexturesCustom = $true    # true = дорисованные, false = жёсткая обрезка
     Zoom           = $true
     DistMax        = 76
     Russian        = $false
-    Wasd           = $false
     ExeMode        = 'skip'
 }
 if (Test-Path $cfgPath) {
@@ -61,18 +64,11 @@ function Save-Settings {
     $S | ConvertTo-Json | Set-Content -Path $cfgPath -Encoding UTF8
 }
 
-# ---------- Лог (GUI + консоль) ----------
-$script:LogBox = $null
 function Write-Log([string]$msg, [string]$color = 'Gray') {
     foreach ($line in ($msg -split "`r?`n")) {
         if ($line.Trim() -eq '') { continue }
-        if ($script:LogBox) {
-            $script:LogBox.AppendText($line + "`r`n")
-            $script:LogBox.ScrollToCaret()
-        }
         Write-Host $line -ForegroundColor $color
     }
-    if ($script:LogBox) { [System.Windows.Forms.Application]::DoEvents() }
 }
 
 # ---------- Поиск папки с игрой ----------
@@ -116,6 +112,86 @@ function Resolve-GamePath {
     return $null
 }
 
+function Get-EngineDir([string]$gp) {
+    $sga = Get-ChildItem -Path $gp -Recurse -Filter 'Engine.sga' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($sga) { return (Split-Path $sga.FullName -Parent) }
+    return (Join-Path $gp 'Engine')
+}
+
+# ---------- Определение текущего состояния игры ----------
+# Читает реальные факты с диска, а не только наш конфиг: если мод
+# (или русификатор) поставлен раньше/вручную — это будет видно.
+function Get-Status([string]$gp) {
+    $st = [ordered]@{
+        GamePath          = $gp
+        WidescreenPatched = $false
+        Width             = 0
+        Height            = 0
+        UiInstalled       = $false
+        TexturesCustom    = $false
+        ZoomInstalled     = $false
+        DistMax           = 0
+        LocaleRussian     = $false   # файлы русификатора лежат в игре
+        LangRussian       = $false   # в W40k.ini стоит [lang:russian]
+        BackupExists      = $false
+    }
+    if (-not $gp -or -not (Test-Path (Join-Path $gp 'W40k.exe'))) { return $st }
+    $engineDir = Get-EngineDir $gp
+
+    # widescreen: в пропатченной Platform.dll не остаётся константы 4:3
+    $plat = Join-Path $gp 'Platform.dll'
+    if (Test-Path $plat) {
+        try {
+            $bytes = [IO.File]::ReadAllBytes($plat)
+            $found = $false
+            for ($i = 0; $i -le $bytes.Length - 4; $i++) {
+                if ($bytes[$i] -eq 0xAB -and $bytes[$i+1] -eq 0xAA -and $bytes[$i+2] -eq 0xAA -and $bytes[$i+3] -eq 0x3F) { $found = $true; break }
+            }
+            $st.WidescreenPatched = -not $found
+        } catch {}
+    }
+    $st.BackupExists = Test-Path (Join-Path $gp '_widescreen_backup')
+
+    # разрешение — из Local.ini
+    $ini = Join-Path $gp 'Local.ini'
+    if (Test-Path $ini) {
+        $txt = Get-Content $ini -Raw
+        if ($txt -match '(?im)^\s*screenwidth\s*=\s*(\d+)')  { $st.Width  = [int]$Matches[1] }
+        if ($txt -match '(?im)^\s*screenheight\s*=\s*(\d+)') { $st.Height = [int]$Matches[1] }
+    }
+
+    # UI-мод — по манифесту установки
+    $st.UiInstalled = Test-Path (Join-Path $engineDir 'Data\ui-unstretch-manifest.txt')
+    # какие текстуры стоят — по маркеру, который пишет Apply
+    $st.TexturesCustom = Test-Path (Join-Path $engineDir 'Data\ui-textures-custom.marker')
+
+    # зум — по loose-файлу камеры
+    $cam = Join-Path $engineDir 'Data\camera_high.lua'
+    if (Test-Path $cam) {
+        $st.ZoomInstalled = $true
+        $ct = Get-Content $cam -Raw
+        if ($ct -match '(?im)^\s*DistMax\s*=\s*([\d\.]+)') { $st.DistMax = [double]$Matches[1] }
+    }
+
+    # русификатор: файлы локализации в игре
+    $loc = @(Get-ChildItem -Path $gp -Recurse -Directory -Filter 'Russian' -ErrorAction SilentlyContinue |
+             Where-Object { $_.Parent.Name -ieq 'Locale' })
+    if ($loc.Count -eq 0) {
+        # часть сборок кладёт локаль архивами W40kDataLoc/Russian*.sga
+        $locSga = @(Get-ChildItem -Path $gp -Recurse -Filter '*.sga' -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Name -match '(?i)russian' })
+        $st.LocaleRussian = $locSga.Count -gt 0
+    } else {
+        $st.LocaleRussian = $true
+    }
+    $wini = Join-Path $gp 'W40k.ini'
+    if (Test-Path $wini) {
+        $wt = Get-Content $wini -Raw
+        $st.LangRussian = $wt -match '(?i)\[lang:\s*russian\s*\]'
+    }
+    return $st
+}
+
 # ---------- Дочерние скрипты ----------
 function Invoke-Child([string]$script, [hashtable]$scriptArgs) {
     $path = Join-Path $root $script
@@ -128,27 +204,44 @@ function Invoke-Child([string]$script, [hashtable]$scriptArgs) {
     }
 }
 
-# ---------- Русский язык (W40k.ini, строка [lang:...]) ----------
+# ---------- Русификатор ----------
+function Install-RussianArchive([string]$gp, [string]$archive) {
+    if (-not (Test-Path $archive)) { Write-Log "[!] Архив русификатора не найден: $archive" 'Red'; return $false }
+    Write-Log "Устанавливаю русификатор из архива: $archive" 'Cyan'
+    $ext = [IO.Path]::GetExtension($archive).ToLowerInvariant()
+    try {
+        if ($ext -eq '.zip') {
+            Expand-Archive -Path $archive -DestinationPath $gp -Force
+        } else {
+            $sevenZip = @("C:\Program Files\7-Zip\7z.exe", "C:\Program Files (x86)\7-Zip\7z.exe") |
+                        Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $sevenZip) {
+                Write-Log "[!] Для архивов $ext нужен 7-Zip (не найден). Распакуйте архив в папку игры вручную или установите 7-Zip." 'Red'
+                return $false
+            }
+            & $sevenZip x $archive "-o$gp" -y | Out-Null
+        }
+        Write-Log "Файлы русификатора распакованы в папку игры." 'Green'
+        return $true
+    } catch {
+        Write-Log "[!] Не удалось распаковать архив: $($_.Exception.Message)" 'Red'
+        return $false
+    }
+}
+
 function Set-GameLanguage([string]$gp, [bool]$russian) {
     $ini = Join-Path $gp 'W40k.ini'
     $target = if ($russian) { 'russian' } else { 'english' }
     if (-not (Test-Path $ini)) {
-        Write-Log "[!] W40k.ini не найден в папке игры — язык не изменён (файл создаётся после первого запуска)." 'Yellow'
+        Write-Log "[!] W40k.ini не найден — язык не изменён (файл создаётся после первого запуска игры)." 'Yellow'
         return
-    }
-    if ($russian) {
-        $loc = @(Get-ChildItem -Path $gp -Recurse -Directory -Filter 'Russian' -ErrorAction SilentlyContinue |
-                 Where-Object { $_.Parent.Name -ieq 'Locale' })
-        if ($loc.Count -eq 0) {
-            Write-Log "[!] Папка Locale\Russian не найдена — похоже, русская локализация не установлена. Прописываю язык всё равно (проверьте свойства игры в Steam: язык -> русский)." 'Yellow'
-        }
     }
     $bak = "$ini.wsbak"
     if (-not (Test-Path $bak)) { Copy-Item $ini $bak }
     Set-ItemProperty $ini -Name IsReadOnly -Value $false -ErrorAction SilentlyContinue
     $txt = Get-Content $ini -Raw
-    if ($txt -match '\[lang:[^\]]*\]') {
-        $txt = $txt -replace '\[lang:[^\]]*\]', "[lang:$target]"
+    if ($txt -match '(?i)\[lang:[^\]]*\]') {
+        $txt = $txt -replace '(?i)\[lang:[^\]]*\]', "[lang:$target]"
     } else {
         $txt = $txt.TrimEnd() + "`r`n[lang:$target]`r`n"
     }
@@ -173,19 +266,31 @@ function Apply-Settings {
     if (-not $gp) { Write-Log "[!] Папка игры не найдена — укажите её и повторите." 'Red'; return $false }
     Save-Settings
     Write-Log "=== Применяю настройки (игра: $gp) ===" 'Cyan'
+    $engineDir = Get-EngineDir $gp
+    $marker = Join-Path $engineDir 'Data\ui-textures-custom.marker'
 
     if ($S.Widescreen) {
-        Write-Log "-- Widescreen UI (разрешение $($S.Width)x$($S.Height))..." 'Cyan'
+        # Дисковый патч: после него игра запускается из Steam как обычно
+        Write-Log "-- Widescreen: патчу файлы игры на диске ($($S.Width)x$($S.Height), exe: $($S.ExeMode))..." 'Cyan'
+        Invoke-Child 'widescreen\DoW-Widescreen-Patcher.ps1' @{ Width = [int]$S.Width; Height = [int]$S.Height; ExeMode = [string]$S.ExeMode; GamePath = $gp }
+
+        Write-Log "-- Нерастянутый UI..." 'Cyan'
         Invoke-Child 'ui-unstretch\Install-UnstretchedUI.ps1' @{ Width = [int]$S.Width; Height = [int]$S.Height; GamePath = $gp }
+
         if ($S.TexturesCustom) {
             Write-Log "-- Текстуры: дорисованные (textures-custom)..." 'Cyan'
             Invoke-Child 'ui-unstretch\Edit-BarTextures.ps1' @{ Import = $true; GamePath = $gp }
+            New-Item -ItemType Directory -Force -Path (Split-Path $marker -Parent) | Out-Null
+            Set-Content -Path $marker -Value 'custom' -Encoding ASCII
         } else {
-            Write-Log "-- Текстуры: жёсткая обрезка (стандартная нарезка уже установлена)." 'Cyan'
+            Write-Log "-- Текстуры: жёсткая обрезка (стандартная нарезка)." 'Cyan'
+            if (Test-Path $marker) { Remove-Item $marker -Force }
         }
     } else {
-        Write-Log "-- Widescreen выключен: убираю UI-мод (и текстуры вместе с ним)..." 'Cyan'
+        Write-Log "-- Widescreen выключен: возвращаю оригинальные файлы игры и убираю UI-мод..." 'Cyan'
+        Invoke-Child 'widescreen\DoW-Widescreen-Patcher.ps1' @{ Restore = $true; GamePath = $gp }
         Invoke-Child 'ui-unstretch\Install-UnstretchedUI.ps1' @{ Restore = $true; GamePath = $gp }
+        if (Test-Path $marker) { Remove-Item $marker -Force }
     }
 
     if ($S.Zoom) {
@@ -196,308 +301,72 @@ function Apply-Settings {
         Invoke-Child 'camera-zoom\Install-CameraZoom.ps1' @{ Restore = $true; GamePath = $gp }
     }
 
-    Set-GameLanguage $gp $S.Russian
-    if ($S.Wasd) {
-        Write-Log "WASD-камера: будет включена при запуске игры через лаунчер (Scroll Lock — переключатель)." 'Cyan'
+    if ($S.Russian) {
+        $st = Get-Status $gp
+        if (-not $st.LocaleRussian) {
+            if ($RussianArchive) {
+                [void](Install-RussianArchive $gp $RussianArchive)
+            } else {
+                Write-Log "[!] Файлы русификатора в игре не найдены. Скачайте архив (см. README) и укажите его в менеджере — тогда он будет распакован в папку игры." 'Yellow'
+            }
+        } else {
+            Write-Log "Файлы русификатора уже в игре — переустановка не нужна." 'Green'
+        }
     }
-    Write-Log "=== Настройки применены ===" 'Green'
+    Set-GameLanguage $gp ([bool]$S.Russian)
+
+    Write-Log "=== Настройки применены. Игру можно запускать обычным способом из Steam. ===" 'Green'
     return $true
 }
 
 function Launch-Game {
     $gp = Resolve-GamePath
     if (-not $gp) { Write-Log "[!] Папка игры не найдена." 'Red'; return }
-    if ($S.Widescreen) {
-        Write-Log "Запускаю игру через widescreen-лаунчер (патч в памяти)..." 'Cyan'
-        $wargs = @('-ExecutionPolicy','Bypass','-File', (Join-Path $root 'widescreen\Start-DoWWidescreen.ps1'),
-                   '-Width', $S.Width, '-Height', $S.Height, '-ExeMode', $S.ExeMode,
-                   '-Game', $S.Game, '-GamePath', $gp)
-        Start-Process powershell -ArgumentList $wargs
-    } else {
-        $exe = if ($S.Game -eq 'WA') { 'W40kWA.exe' } else { 'W40k.exe' }
-        Write-Log "Запускаю $exe без патча (widescreen выключен)..." 'Cyan'
-        Start-Process (Join-Path $gp $exe) -WorkingDirectory $gp
-    }
-    if ($S.Wasd) {
-        Write-Log "Включаю WASD-камеру (Scroll Lock ВКЛ = камера, ВЫКЛ = хоткеи)..." 'Cyan'
-        Start-Process powershell -WindowStyle Minimized -ArgumentList @(
-            '-ExecutionPolicy','Bypass','-File', (Join-Path $root 'tools\WasdCamera.ps1'))
-    }
+    $exe = if ($S.Game -eq 'WA') { 'W40kWA.exe' } else { 'W40k.exe' }
+    Write-Log "Запускаю $exe..." 'Cyan'
+    Start-Process (Join-Path $gp $exe) -WorkingDirectory $gp
 }
 
 function Restore-Everything {
     $gp = Resolve-GamePath
     if (-not $gp) { Write-Log "[!] Папка игры не найдена." 'Red'; return }
     Write-Log "=== Полный откат всех модов ===" 'Cyan'
+    Invoke-Child 'widescreen\DoW-Widescreen-Patcher.ps1' @{ Restore = $true; GamePath = $gp }
     Invoke-Child 'ui-unstretch\Install-UnstretchedUI.ps1' @{ Restore = $true; GamePath = $gp }
     Invoke-Child 'camera-zoom\Install-CameraZoom.ps1' @{ Restore = $true; GamePath = $gp }
-    Invoke-Child 'widescreen\Start-DoWWidescreen.ps1' @{ RestoreIni = $true; GamePath = $gp }
     Restore-GameLanguage $gp
-    # добираем TGA, добавленные -Import мимо манифеста (папку пишут только наши моды)
-    $engineSga = Get-ChildItem -Path $gp -Recurse -Filter 'Engine.sga' -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($engineSga) {
-        $engineDir = Split-Path $engineSga.FullName -Parent
-        foreach ($sub in @('Data\art\ui\textures\taskbar', 'Data\art\ui\screens')) {
-            $p = Join-Path $engineDir $sub
-            if (Test-Path $p) {
-                Remove-Item $p -Recurse -Force
-                Write-Log "Удалена папка мода: $p" 'Green'
-            }
-        }
+    # добираем файлы, добавленные мимо манифеста (папки пишут только наши моды)
+    $engineDir = Get-EngineDir $gp
+    foreach ($sub in @('Data\art\ui\textures\taskbar', 'Data\art\ui\screens')) {
+        $p = Join-Path $engineDir $sub
+        if (Test-Path $p) { Remove-Item $p -Recurse -Force; Write-Log "Удалена папка мода: $p" 'Green' }
     }
-    Write-Log "=== Откат завершён. Widescreen-патч не требует отката: без лаунчера игра оригинальна. ===" 'Green'
+    $marker = Join-Path $engineDir 'Data\ui-textures-custom.marker'
+    if (Test-Path $marker) { Remove-Item $marker -Force }
+    Write-Log "=== Откат завершён. Файлы игры возвращены к оригиналу. ===" 'Green'
+    Write-Log "Примечание: файлы русификатора (если ставились) не удаляются — только язык в W40k.ini возвращён на английский." 'DarkGray'
 }
 
-# ---------- CLI-режимы ----------
-if ($IsCli) {
-    if ($RestoreAll) { Restore-Everything; exit 0 }
+# ---------- Точка входа ----------
+if ($Status) {
+    $gp = Resolve-GamePath
+    Get-Status $gp | ConvertTo-Json -Compress
+    exit 0
+}
+if ($RestoreAll) { Restore-Everything; exit 0 }
+if ($Apply -or $Launch) {
     $ok = Apply-Settings
     if ($Launch -and $ok) { Launch-Game }
     exit 0
 }
 
-# ---------- GUI ----------
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-[System.Windows.Forms.Application]::EnableVisualStyles()
+Write-Host @"
+Бэкенд модов Dawn of War. Графический менеджер: DoW-ModManager.exe
+(соберите: powershell -File app\Build-App.ps1)
 
-$form = New-Object System.Windows.Forms.Form
-$form.Text = 'Dawn of War — Mod Launcher'
-$form.Size = New-Object System.Drawing.Size(600, 756)
-$form.FormBorderStyle = 'FixedDialog'
-$form.MaximizeBox = $false
-$form.StartPosition = 'CenterScreen'
-
-function New-Label($text, $x, $y, $w = 120) {
-    $l = New-Object System.Windows.Forms.Label
-    $l.Text = $text; $l.Location = New-Object System.Drawing.Point($x, $y)
-    $l.Size = New-Object System.Drawing.Size($w, 20)
-    $l
-}
-
-# --- Группа: игра ---
-$grpGame = New-Object System.Windows.Forms.GroupBox
-$grpGame.Text = 'Игра'
-$grpGame.Location = New-Object System.Drawing.Point(12, 10)
-$grpGame.Size = New-Object System.Drawing.Size(560, 80)
-
-$txtPath = New-Object System.Windows.Forms.TextBox
-$txtPath.Location = New-Object System.Drawing.Point(12, 22)
-$txtPath.Size = New-Object System.Drawing.Size(430, 22)
-$txtPath.Text = $S.GamePath
-
-$btnBrowse = New-Object System.Windows.Forms.Button
-$btnBrowse.Text = 'Обзор...'
-$btnBrowse.Location = New-Object System.Drawing.Point(450, 20)
-$btnBrowse.Size = New-Object System.Drawing.Size(98, 25)
-$btnBrowse.Add_Click({
-    $dlg = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dlg.Description = 'Папка с игрой (где лежит W40k.exe)'
-    if ($dlg.ShowDialog() -eq 'OK') { $txtPath.Text = $dlg.SelectedPath }
-})
-
-$btnAuto = New-Object System.Windows.Forms.Button
-$btnAuto.Text = 'Найти автоматически'
-$btnAuto.Location = New-Object System.Drawing.Point(12, 50)
-$btnAuto.Size = New-Object System.Drawing.Size(150, 24)
-$btnAuto.Add_Click({
-    $p = Find-GamePath
-    if ($p) { $txtPath.Text = $p } else { Write-Log "[!] Автопоиск не нашёл игру — укажите папку вручную." 'Yellow' }
-})
-
-$cmbGame = New-Object System.Windows.Forms.ComboBox
-$cmbGame.DropDownStyle = 'DropDownList'
-[void]$cmbGame.Items.AddRange(@('W40k (базовая игра)', 'WA (Winter Assault)'))
-$cmbGame.SelectedIndex = if ($S.Game -eq 'WA') { 1 } else { 0 }
-$cmbGame.Location = New-Object System.Drawing.Point(380, 50)
-$cmbGame.Size = New-Object System.Drawing.Size(168, 24)
-$grpGame.Controls.AddRange(@($txtPath, $btnBrowse, $btnAuto, $cmbGame))
-
-# --- Группа: widescreen + UI ---
-$tip = New-Object System.Windows.Forms.ToolTip
-$tip.AutoPopDelay = 20000; $tip.InitialDelay = 350; $tip.ReshowDelay = 100; $tip.ShowAlways = $true
-
-$grpWs = New-Object System.Windows.Forms.GroupBox
-$grpWs.Text = 'Widescreen-отрисовка + нерастянутый UI (единый комплект)'
-$grpWs.Location = New-Object System.Drawing.Point(12, 96)
-$grpWs.Size = New-Object System.Drawing.Size(560, 176)
-
-$chkWs = New-Object System.Windows.Forms.CheckBox
-$chkWs.Text = 'Включить отрисовку под разрешение (UI ставится автоматически)'
-$chkWs.Location = New-Object System.Drawing.Point(12, 22)
-$chkWs.Size = New-Object System.Drawing.Size(540, 20)
-$chkWs.Checked = [bool]$S.Widescreen
-$tip.SetToolTip($chkWs, @"
-Расширяет обзор под ваш экран (честный FOV, не растяжение) и ставит нерастянутый UI.
-Панели HUD не тянутся на всю ширину, а делятся и разъезжаются по углам экрана:
-  - мини-карта и ресурсы -> левый нижний угол;
-  - панель выбора отряда, команды и кнопки меню -> правый нижний угол;
-  - центр экрана открыт, там виден 3D-мир.
-Отрисовка и UI работают только вместе: выключение снимает и UI-мод.
-"@)
-
-$lblRes = New-Label 'Разрешение:' 12 52 90
-$cmbRes = New-Object System.Windows.Forms.ComboBox
-$cmbRes.DropDownStyle = 'DropDownList'
-[void]$cmbRes.Items.AddRange(@('3440x1440', '2560x1080', '3840x1600', '5120x1440', '2560x1440', '1920x1080', 'другое'))
-$cmbRes.Location = New-Object System.Drawing.Point(108, 48)
-$cmbRes.Size = New-Object System.Drawing.Size(120, 24)
-
-$numW = New-Object System.Windows.Forms.NumericUpDown
-$numW.Minimum = 640; $numW.Maximum = 10000; $numW.Value = [int]$S.Width
-$numW.Location = New-Object System.Drawing.Point(240, 48)
-$numW.Size = New-Object System.Drawing.Size(70, 24)
-$lblX = New-Label 'x' 314 52 12
-$numH = New-Object System.Windows.Forms.NumericUpDown
-$numH.Minimum = 480; $numH.Maximum = 5000; $numH.Value = [int]$S.Height
-$numH.Location = New-Object System.Drawing.Point(330, 48)
-$numH.Size = New-Object System.Drawing.Size(70, 24)
-
-$preset = "$($S.Width)x$($S.Height)"
-if ($cmbRes.Items.Contains($preset)) { $cmbRes.SelectedItem = $preset } else { $cmbRes.SelectedItem = 'другое' }
-$cmbRes.Add_SelectedIndexChanged({
-    if ($cmbRes.SelectedItem -ne 'другое' -and $cmbRes.SelectedItem -match '^(\d+)x(\d+)$') {
-        $numW.Value = [int]$Matches[1]; $numH.Value = [int]$Matches[2]
-    }
-})
-
-$lblTex = New-Label 'Текстуры баров:' 12 84 110
-$radTexCustom = New-Object System.Windows.Forms.RadioButton
-$radTexCustom.Text = 'дорисованные (textures-custom)'
-$radTexCustom.Location = New-Object System.Drawing.Point(128, 82)
-$radTexCustom.Size = New-Object System.Drawing.Size(230, 20)
-$radTexHard = New-Object System.Windows.Forms.RadioButton
-$radTexHard.Text = 'жёсткая обрезка (стандарт)'
-$radTexHard.Location = New-Object System.Drawing.Point(360, 82)
-$radTexHard.Size = New-Object System.Drawing.Size(195, 20)
-if ($S.TexturesCustom) { $radTexCustom.Checked = $true } else { $radTexHard.Checked = $true }
-$tip.SetToolTip($radTexCustom, @"
-Фоны панелей берутся из ui-unstretch\textures-custom (ваш перерисованный арт
-с плавными/аккуратными краями) и подгоняются под гнёзда кнопок. Мягкий стык.
-"@)
-$tip.SetToolTip($radTexHard, @"
-Стандартная текстура из архива режется по границам зон и раздвигается.
-Быстро и без ручной работы, но на местах разреза виден резкий обрыв картинки.
-"@)
-
-$lblWsNote1 = New-Label 'UI-панели делятся и разъезжаются по углам: мини-карта - слева, команды и меню - справа, в центре - 3D-мир.' 12 110 545
-$lblWsNote1.Size = New-Object System.Drawing.Size(545, 30)
-$lblWsNote1.ForeColor = [System.Drawing.Color]::DimGray
-$lblWsNote2 = New-Label '«Дорисованные» - ваш арт с плавным краем; «жёсткая обрезка» - резкий обрыв на стыке. Выкл. отрисовку - UI-мод снимается.' 12 142 545
-$lblWsNote2.Size = New-Object System.Drawing.Size(545, 30)
-$lblWsNote2.ForeColor = [System.Drawing.Color]::DimGray
-
-$grpWs.Controls.AddRange(@($chkWs, $lblRes, $cmbRes, $numW, $lblX, $numH, $lblTex, $radTexCustom, $radTexHard, $lblWsNote1, $lblWsNote2))
-
-$chkWs.Add_CheckedChanged({
-    foreach ($c in @($cmbRes, $numW, $numH, $radTexCustom, $radTexHard)) { $c.Enabled = $chkWs.Checked }
-})
-foreach ($c in @($cmbRes, $numW, $numH, $radTexCustom, $radTexHard)) { $c.Enabled = $chkWs.Checked }
-
-# --- Группа: камера ---
-$grpCam = New-Object System.Windows.Forms.GroupBox
-$grpCam.Text = 'Камера'
-$grpCam.Location = New-Object System.Drawing.Point(12, 278)
-$grpCam.Size = New-Object System.Drawing.Size(560, 84)
-
-$chkZoom = New-Object System.Windows.Forms.CheckBox
-$chkZoom.Text = 'Улучшенный зум (отвод колёсиком дальше), DistMax:'
-$chkZoom.Location = New-Object System.Drawing.Point(12, 22)
-$chkZoom.Size = New-Object System.Drawing.Size(330, 20)
-$chkZoom.Checked = [bool]$S.Zoom
-
-$numDist = New-Object System.Windows.Forms.NumericUpDown
-$numDist.Minimum = 38; $numDist.Maximum = 300; $numDist.Value = [int]$S.DistMax
-$numDist.Location = New-Object System.Drawing.Point(350, 20)
-$numDist.Size = New-Object System.Drawing.Size(70, 24)
-
-$chkWasd = New-Object System.Windows.Forms.CheckBox
-$chkWasd.Text = 'WASD-камера (Scroll Lock ВКЛ = камера, ВЫКЛ = обычные хоткеи)'
-$chkWasd.Location = New-Object System.Drawing.Point(12, 50)
-$chkWasd.Size = New-Object System.Drawing.Size(540, 20)
-$chkWasd.Checked = [bool]$S.Wasd
-$tip.SetToolTip($chkZoom, @"
-Отодвигает максимальный отвод камеры колёсиком (DistMax; оригинал 38).
-Требует включённой «Full 3D Camera» в настройках графики игры.
-"@)
-$tip.SetToolTip($chkWasd, @"
-В движке DoW1 клавиши камеры не переназначаются, поэтому включается перехватчик:
-Scroll Lock ВКЛ - W/A/S/D двигают камеру (лампочка на клавиатуре = режим включён);
-Scroll Lock ВЫКЛ - те же клавиши работают как обычные хоткеи (A = attack-move и т.д.).
-Действует только в окне игры, закрывается вместе с ней.
-"@)
-
-$grpCam.Controls.AddRange(@($chkZoom, $numDist, $chkWasd))
-
-# --- Группа: язык ---
-$grpLang = New-Object System.Windows.Forms.GroupBox
-$grpLang.Text = 'Язык'
-$grpLang.Location = New-Object System.Drawing.Point(12, 368)
-$grpLang.Size = New-Object System.Drawing.Size(560, 52)
-
-$chkRus = New-Object System.Windows.Forms.CheckBox
-$chkRus.Text = 'Русский язык ([lang:russian] в W40k.ini; локализация должна быть установлена)'
-$chkRus.Location = New-Object System.Drawing.Point(12, 20)
-$chkRus.Size = New-Object System.Drawing.Size(540, 20)
-$chkRus.Checked = [bool]$S.Russian
-$tip.SetToolTip($chkRus, @"
-Прописывает строку [lang:russian] в W40k.ini (с резервной копией).
-Сами русские файлы должны быть в игре (Locale\Russian) - иначе выберите
-русский язык в свойствах игры в Steam, чтобы Steam их докачал.
-"@)
-$grpLang.Controls.Add($chkRus)
-
-# --- Кнопки ---
-function Sync-SettingsFromForm {
-    $S.GamePath       = $txtPath.Text.Trim()
-    $S.Game           = if ($cmbGame.SelectedIndex -eq 1) { 'WA' } else { 'W40k' }
-    $S.Width          = [int]$numW.Value
-    $S.Height         = [int]$numH.Value
-    $S.Widescreen     = $chkWs.Checked
-    $S.TexturesCustom = $radTexCustom.Checked
-    $S.Zoom           = $chkZoom.Checked
-    $S.DistMax        = [int]$numDist.Value
-    $S.Russian        = $chkRus.Checked
-    $S.Wasd           = $chkWasd.Checked
-}
-
-$btnApply = New-Object System.Windows.Forms.Button
-$btnApply.Text = 'Применить'
-$btnApply.Location = New-Object System.Drawing.Point(12, 428)
-$btnApply.Size = New-Object System.Drawing.Size(140, 32)
-$btnApply.Add_Click({ Sync-SettingsFromForm; [void](Apply-Settings) })
-
-$btnPlay = New-Object System.Windows.Forms.Button
-$btnPlay.Text = 'Применить и играть'
-$btnPlay.Location = New-Object System.Drawing.Point(160, 428)
-$btnPlay.Size = New-Object System.Drawing.Size(170, 32)
-$btnPlay.Font = New-Object System.Drawing.Font($btnPlay.Font, [System.Drawing.FontStyle]::Bold)
-$btnPlay.Add_Click({ Sync-SettingsFromForm; if (Apply-Settings) { Launch-Game } })
-
-$btnRestore = New-Object System.Windows.Forms.Button
-$btnRestore.Text = 'Полный откат'
-$btnRestore.Location = New-Object System.Drawing.Point(432, 428)
-$btnRestore.Size = New-Object System.Drawing.Size(140, 32)
-$btnRestore.Add_Click({ Sync-SettingsFromForm; Save-Settings; Restore-Everything })
-
-# --- Лог ---
-$log = New-Object System.Windows.Forms.TextBox
-$log.Multiline = $true; $log.ReadOnly = $true; $log.ScrollBars = 'Vertical'
-$log.Location = New-Object System.Drawing.Point(12, 470)
-$log.Size = New-Object System.Drawing.Size(560, 210)
-$log.Font = New-Object System.Drawing.Font('Consolas', 8.5)
-$script:LogBox = $log
-
-$form.Controls.AddRange(@($grpGame, $grpWs, $grpCam, $grpLang, $btnApply, $btnPlay, $btnRestore, $log))
-
-if (-not $S.GamePath) {
-    $auto = Find-GamePath
-    if ($auto) { $txtPath.Text = $auto; $S.GamePath = $auto }
-}
-Write-Log "Готов. Настройте и нажмите «Применить и играть»." 'Cyan'
-if (-not (Test-Path (Join-Path $root 'ui-unstretch\textures-custom'))) {
-    $radTexCustom.Enabled = $false; $radTexHard.Checked = $true
-    Write-Log "textures-custom не найдены — доступна только жёсткая обрезка." 'Yellow'
-}
-
-[void]$form.ShowDialog()
+Консольные режимы:
+  -Status       текущее состояние игры (JSON)
+  -Apply        применить настройки из launcher-settings.json
+  -Launch       применить и запустить игру
+  -RestoreAll   полный откат
+"@ -ForegroundColor Cyan
