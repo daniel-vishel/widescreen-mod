@@ -141,9 +141,9 @@ powershell -ExecutionPolicy Bypass -File .\app\Build-App.ps1   # иконка п
   вырезается заливкой от краёв, арт выравнивается по габаритам оригинала;
   совмещение можно проверить в `textures-custom\_preview\` без запуска игры.
 
-Инструменты: `ui-unstretch\Edit-BarTextures.ps1` (`-Export` выгрузить ломтики в
-PNG, `-Preview` проверить совмещение, `-Import` вернуть в игру),
-`tools\Extract-Sga.ps1` (распаковщик архивов SGA v2).
+Инструмент для правки текстур: `ui-unstretch\Edit-BarTextures.ps1` — `-Export`
+выгрузить ломтики в PNG, `-Preview` проверить совмещение без запуска игры,
+`-Import` вернуть правки в игру.
 
 ---
 
