@@ -2,7 +2,7 @@
 ui-unstretch/extracted/
 .claude/
 ui-unstretch/textures/
-ui-unstretch/textures-custom/
+ui-unstretch/textures-custom/_preview/
 launcher-settings.json
 DoW-ModManager.exe
 app/*.pdb

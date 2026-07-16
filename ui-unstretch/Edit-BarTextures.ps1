@@ -56,9 +56,12 @@ if (-not $Export -and -not $Import -and -not $Preview) {
 }
 
 # Разрезы — те же, что в Install-UnstretchedUI.ps1 (держать в синхроне!)
+# Fade — кромка ломтика, смотрящая в открытый мир: там альфа мягко
+# уходит в 0, чтобы панель растворялась, а не обрывалась хардкатом.
+# 'R' — правая кромка, 'L' — левая; по индексу ломтика.
 $barSlices = @(
-    @{ Base = 'taskbar';      Cuts = @(0.0, 0.278, 0.630, 1.0) },
-    @{ Base = 'taskbar_menu'; Cuts = @(0.0, 0.45, 1.0) }
+    @{ Base = 'taskbar';      Cuts = @(0.0, 0.278, 0.630, 1.0); Fade = @{ 0 = 'R'; 2 = 'L' } },
+    @{ Base = 'taskbar_menu'; Cuts = @(0.0, 0.45, 1.0);         Fade = @{ 0 = 'R'; 1 = 'L' } }
 )
 
 # ---------- C#: чтение SGA v2 + декодер DXT ----------
@@ -329,6 +332,24 @@ if ($Export -or $Import) {
 
 function Get-Pow2([int]$n) { $p = 1; while ($p -lt $n) { $p *= 2 }; return $p }
 
+# Плавное затухание альфы на кромке контента [0..cw) внутри буфера P*th
+# (BGRA). $side: 'R' — правая кромка, 'L' — левая. Ширина фейда — доля cw.
+function Apply-Fade([byte[]]$buf, [int]$P, [int]$th, [int]$cw, [string]$side, [double]$frac = 0.16) {
+    if (-not $side) { return }
+    $fw = [int]([Math]::Round($cw * $frac))
+    if ($fw -lt 2) { return }
+    for ($x = 0; $x -lt $fw; $x++) {
+        # t: 1 у внутреннего края фейда, 0 у самой кромки
+        $t = ($x + 0.5) / $fw
+        $col = if ($side -eq 'R') { $cw - 1 - $x } else { $x }
+        for ($y = 0; $y -lt $th; $y++) {
+            $o = ($y * $P + $col) * 4 + 3
+            $a = $buf[$o]
+            if ($a -gt 0) { $buf[$o] = [byte][int]([Math]::Round($a * $t)) }
+        }
+    }
+}
+
 # BGRA (порядок строк DDS, «вверх ногами») <-> Bitmap (нормальная ориентация)
 function Save-PngFlipped([byte[]]$px, [int]$w, [int]$h, [string]$path) {
     $bmp = New-Object System.Drawing.Bitmap($w, $h, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -505,7 +526,7 @@ if ($Export) {
     $entries = [SgaV2R2]::ReadToc($engineSga.FullName)
     $count = 0
     foreach ($spec in $barSlices) {
-        $base = $spec.Base; $cuts = $spec.Cuts
+        $base = $spec.Base; $cuts = $spec.Cuts; $fade = $spec.Fade
         $srcs = @($entries | Where-Object { $_.Path -match "textures/taskbar/[^/]+/$base\.dds$" })
         foreach ($src in $srcs) {
             $d = [SgaV2R2]::ReadFileData($engineSga.FullName, $src)
@@ -524,10 +545,13 @@ if ($Export) {
                 for ($y = 0; $y -lt $th; $y++) {
                     [Array]::Copy($px, ($y * $tw + $x0) * 4, $buf, $y * $P * 4, $cw * 4)
                 }
+                $side = $null; if ($fade -and $fade.ContainsKey($i)) { $side = $fade[$i] }
+                if ($side) { Apply-Fade $buf $P $th $cw $side }
                 $f = Join-Path $outDir ("{0}_ws{1}.png" -f $base, ($i + 1))
                 Save-PngFlipped $buf $P $th $f
                 $count++
-                Write-Host ("  [OK] {0}\{1}_ws{2}.png  (контент {3}px из {4}px холста)" -f $folder, $base, ($i+1), $cw, $P) -ForegroundColor Green
+                $fnote = if ($side) { " фейд:$side" } else { '' }
+                Write-Host ("  [OK] {0}\{1}_ws{2}.png  (контент {3}px из {4}px холста){5}" -f $folder, $base, ($i+1), $cw, $P, $fnote) -ForegroundColor Green
             }
         }
     }

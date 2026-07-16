@@ -253,6 +253,12 @@ public static class ScreenFile {
     public static string[] ForceLeft   = new string[0];
     public static string[] ForceCenter = new string[0];
     public static string[] ForceRight  = new string[0];
+    // Жёсткое переопределение экранной x-позиции виджета (доля экрана).
+    // Для случаев, когда автосжатие ставит виджет не туда (напр. кнопки
+    // «след. юнит»/overwatch, наезжающие на ромб мини-карты). Размер
+    // всё равно масштабируется на k (чтобы кнопки остались квадратными).
+    public static System.Collections.Generic.Dictionary<string,double> ForcePosX =
+        new System.Collections.Generic.Dictionary<string,double>(StringComparer.OrdinalIgnoreCase);
 
     public static void Transform(LNode fileRoot, double k) {
         Patched = 0;
@@ -289,6 +295,15 @@ public static class ScreenFile {
         string name = w.GetStr("name");
         if (In(Expand, name)) { SetFullScreen(w); return; }
         if (In(Keep, name)) { TransformChildren(w, k, anchorMode); return; }
+        if (name != null && ForcePosX.ContainsKey(name)) {
+            var pp = w.Get("position");
+            if (pp != null && pp.IsTable && pp.Items.Count >= 1)
+                pp.Items[0].Scalar = ForcePosX[name].ToString("0.#####", CultureInfo.InvariantCulture);
+            ScaleX(w.Get("size"), k, 0.0);
+            Patched++;
+            TransformChildren(w, k, false);
+            return;
+        }
         double x  = GetX(w.Get("position"), 0.0);
         double sx = GetX(w.Get("size"), double.NaN);
         if (anchorMode && !double.IsNaN(sx) && sx >= 0.95 && Math.Abs(x) <= 0.02) {
@@ -574,6 +589,16 @@ Write-Host "Файлов разметки к преобразованию: $($sc
     'txtPlayerName', 'txtForceName', 'btnHideTaskbar'
 )
 [ScreenFile]::ForceCenter = @('txtChatTeam','txtChatAll') # подписи прилегают к полю ввода чата
+
+# Кнопки «след. юнит» и overwatch в стоке стоят справа от широкой
+# мини-карты. После сжатия HUD они наезжают на ромб — пришпиливаем их
+# правее правого угла ромба (ромб занимает x 0..~0.155), компактным
+# столбцом на кромке. Значения — экранная x-доля (подбор по макету).
+[ScreenFile]::ForcePosX['btnNextResearch']  = 0.163
+[ScreenFile]::ForcePosX['btnNextBuilder']   = 0.163
+[ScreenFile]::ForcePosX['btnNextMilitary']  = 0.185
+[ScreenFile]::ForcePosX['btnOverwatchPause'] = 0.207
+[ScreenFile]::ForcePosX['btnOverwatchStop']  = 0.207
 
 # Разрезы фоновых текстур баров: границы функциональных зон (доли ширины).
 # Нижний бар: гнездо мини-карты | панель отряда | сетка команд.
