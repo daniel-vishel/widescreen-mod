@@ -419,7 +419,7 @@ namespace DowModManager
         NumericUpDown numW, numH, numDist;
         CheckBox chkWs, chkZoom, chkRus;
         RadioButton radCustom, radHard;
-        Button btnApply, btnPlay, btnRestore, btnDefaults, btnRusBrowse, btnLogToggle;
+        Button btnApply, btnPlay, btnRestore, btnDefaults, btnRusBrowse, btnLogToggle, btnLaunchOnly;
         Label lblRusState, lblStatus;
         Panel header;
         ToolTip tip;
@@ -615,6 +615,13 @@ namespace DowModManager
             btnRestore = Btn("Откат", 536, y, 136, 34, (s, e) => Run("restore"));
             tip.SetToolTip(btnRestore, "Возвращает файлы игры к оригиналу и снимает все галочки в окне.\r\nФайлы русификатора при этом не удаляются — только язык вернётся на английский.");
             Controls.AddRange(new Control[] { btnApply, btnPlay, btnDefaults, btnRestore });
+            y += 42;
+
+            // --- «Просто запустить игру» — всегда активна (не зависит от изменений) ---
+            btnLaunchOnly = Btn("▶ Запустить игру", 12, y, 328, 34, (s, e) => Run("launchonly"));
+            btnLaunchOnly.Font = new Font("Segoe UI Semibold", 9.5f, FontStyle.Bold);
+            tip.SetToolTip(btnLaunchOnly, "Просто запускает игру с тем, что сейчас стоит в файлах — ничего не применяя.\r\nАктивна всегда, пока найдена папка игры: не зависит от изменений в окне.");
+            Controls.Add(btnLaunchOnly);
             y += 42;
 
             // --- Статус + переключатель лога ---
@@ -839,6 +846,8 @@ namespace DowModManager
             foreach (Control c in Controls)
                 if (c is GroupBox && c.Text != "Игра") c.Enabled = gameFound;
             btnApply.Enabled = btnPlay.Enabled = btnRestore.Enabled = gameFound && !busy;
+            // «Запустить игру» — только по факту наличия игры, без привязки к изменениям
+            if (btnLaunchOnly != null) btnLaunchOnly.Enabled = gameFound && !busy;
             if (!gameFound)
             {
                 lblStatus.ForeColor = Color.FromArgb(200, 80, 60);
@@ -953,12 +962,13 @@ namespace DowModManager
         void SetBusy(bool b)
         {
             busy = b;
-            if (b) { btnApply.Enabled = btnPlay.Enabled = btnRestore.Enabled = false; }
+            if (b) { btnApply.Enabled = btnPlay.Enabled = btnRestore.Enabled = false; if (btnLaunchOnly != null) btnLaunchOnly.Enabled = false; }
             btnDefaults.Enabled = !b;
             Cursor = b ? Cursors.WaitCursor : Cursors.Default;
             if (!b)
             {
                 btnRestore.Enabled = gameFound;
+                if (btnLaunchOnly != null) btnLaunchOnly.Enabled = gameFound;
                 MarkDirty();
             }
         }
@@ -1015,9 +1025,12 @@ namespace DowModManager
             try { S.Save(cfgPath); }
             catch (Exception ex) { Log("[!] Не удалось сохранить настройки: " + ex.Message); return; }
 
-            string modeArg = mode == "launch" ? "-Launch" : mode == "restore" ? "-RestoreAll" : "-Apply";
+            string modeArg = mode == "launch" ? "-Launch"
+                           : mode == "launchonly" ? "-LaunchOnly"
+                           : mode == "restore" ? "-RestoreAll" : "-Apply";
             Log("");
             Log("==== " + (mode == "launch" ? "Применяю и запускаю игру"
+                       : mode == "launchonly" ? "Запускаю игру"
                        : mode == "restore" ? "Полный откат" : "Применяю настройки") + " ====");
             SetBusy(true);
             RunPs(modeArg, (code, output) =>
@@ -1025,7 +1038,7 @@ namespace DowModManager
                 Log("==== Готово (код выхода " + code + ") ====");
                 SetBusy(false);
                 if (mode == "restore") { ResetUiAfterRestore(); RefreshStatus(); }
-                else RefreshStatus();
+                else if (mode != "launchonly") RefreshStatus();   // просто запуск ничего не меняет
             });
         }
 

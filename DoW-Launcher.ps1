@@ -21,12 +21,14 @@
 #    .\DoW-Launcher.ps1 -Status       — JSON с текущим состоянием игры
 #    .\DoW-Launcher.ps1 -Apply        — применить настройки
 #    .\DoW-Launcher.ps1 -Launch       — применить и запустить игру
+#    .\DoW-Launcher.ps1 -LaunchOnly   — просто запустить игру (без применения)
 #    .\DoW-Launcher.ps1 -RestoreAll   — полный откат
 # ============================================================
 
 param(
     [switch]$Apply,
     [switch]$Launch,
+    [switch]$LaunchOnly,           # просто запустить игру, без применения настроек
     [switch]$RestoreAll,
     [switch]$Status,
     [string]$GamePath = '',
@@ -354,6 +356,7 @@ if ($Status) {
     exit 0
 }
 if ($RestoreAll) { Restore-Everything; exit 0 }
+if ($LaunchOnly) { Launch-Game; exit 0 }   # запуск без применения настроек
 if ($Apply -or $Launch) {
     $ok = Apply-Settings
     if ($Launch -and $ok) { Launch-Game }
