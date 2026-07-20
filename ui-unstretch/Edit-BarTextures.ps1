@@ -374,9 +374,12 @@ function Get-Pow2([int]$n) { $p = 1; while ($p -lt $n) { $p *= 2 }; return $p }
 
 # Плавное затухание альфы на кромке контента [0..cw) внутри буфера P*th
 # (BGRA). $side: 'R' — правая кромка, 'L' — левая. Ширина фейда — доля cw.
-function Apply-Fade([byte[]]$buf, [int]$P, [int]$th, [int]$cw, [string]$side, [double]$frac = 0.16) {
+function Apply-Fade([byte[]]$buf, [int]$P, [int]$th, [int]$cw, [string]$side, [int]$fwPx = 8) {
+    # Тонкий фейд (несколько пикселей) — только сгладить срез, не
+    # трогая контент. Широкий фейд полупрозрачно «затуманивал» панель
+    # (сквозь портрет/гнёзда просвечивал мир).
     if (-not $side) { return }
-    $fw = [int]([Math]::Round($cw * $frac))
+    $fw = [Math]::Min($fwPx, [int]($cw / 2))
     if ($fw -lt 2) { return }
     for ($x = 0; $x -lt $fw; $x++) {
         # t: 1 у внутреннего края фейда, 0 у самой кромки
