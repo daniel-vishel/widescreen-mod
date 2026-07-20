@@ -31,8 +31,21 @@
 #    3) в textures-custom\_preview\ пишется оверлей нового арта с
 #       оригиналом — совмещение можно проверить БЕЗ запуска игры
 #       (то же самое делает -Preview, игра для него не нужна).
+#
+#  ВНУТРЕННИЕ ДЫРЫ панели (командная карта, гнёзда портретов), которые
+#  должны быть ПРОЗРАЧНЫМИ, чтобы сквозь них был виден мир/кнопки:
+#  заливка чёрного от краёв (п.1) до них НЕ доходит — они заперты рамкой.
+#  Два способа их вырезать:
+#    a) нарисовать в редакторе НАСТОЯЩУЮ прозрачность (alpha=0) и выключить
+#       кеинг чёрного: align.json {"threshold":-1} (так сделан taskbar_ws1);
+#    b) залить каждую дыру ярким цветом-маркером, которого нет в реальном
+#       арте (магента FF00FF), и указать его в align.json:
+#       {"chroma":"FF00FF","chromaTol":60} — цвет вырезается ВЕЗДЕ, включая
+#       замкнутые зоны; допуск chromaTol подбирается так, чтобы не задеть
+#       металл рамки.
 #  Точная подгонка (если арт сел неидеально): рядом с PNG положите
-#  <имя>.png.align.json вида {"scale":1.02,"dx":-3,"dy":1,"threshold":12}
+#  <имя>.png.align.json вида
+#     {"scale":1.02,"dx":-3,"dy":1,"threshold":12,"chroma":"FF00FF","chromaTol":60}
 #
 #  ВАЖНО: повторный запуск Install-UnstretchedUI.ps1 перегенерирует
 #  TGA из архива и затрёт ваши правки — после него снова -Import.
@@ -277,6 +290,27 @@ public static class TexAlign {
         int m = Math.Max(px[o], Math.Max(px[o + 1], px[o + 2]));
         if (m <= thr) { bg[i] = true; q.Enqueue(i); }
     }
+
+    // Вырезает по цвету-маркеру ВЕЗДЕ (без привязки к краям): пиксель с
+    // alpha>0, у которого |R-tr|,|G-tg|,|B-tb| <= tol по каждому каналу,
+    // получает alpha=0. В отличие от KeyBackground это достаёт ЗАМКНУТЫЕ
+    // внутренние дыры (командная карта, гнёзда портретов), запертые рамкой,
+    // куда заливка от краёв не дотягивается. Художник помечает такие зоны
+    // ярким «зелёнкой»-цветом (напр. магента FF00FF), который в реальном
+    // арте не встречается, а точечная сверка по каналам не задевает металл
+    // рамки. bgr: target как 0xRRGGBB.
+    public static int KeyChroma(byte[] px, int w, int h, int rgb, int tol) {
+        int tr = (rgb >> 16) & 0xFF, tg = (rgb >> 8) & 0xFF, tb = rgb & 0xFF;
+        int n = 0;
+        for (int i = 0; i < w * h; i++) {
+            int o = i * 4;
+            if (px[o + 3] == 0) continue;
+            if (Math.Abs(px[o + 2] - tr) <= tol &&
+                Math.Abs(px[o + 1] - tg) <= tol &&
+                Math.Abs(px[o]     - tb) <= tol) { px[o + 3] = 0; n++; }
+        }
+        return n;
+    }
 }
 "@
 
@@ -427,23 +461,37 @@ function Process-CustomTextures([bool]$writeTga) {
             Write-Host "  [!!] $race\$name.png — нет оригинала в textures\$race (сначала запустите -Export)" -ForegroundColor Red
             continue
         }
-        # необязательная подгонка: <файл>.align.json {"scale":..,"dx":..,"dy":..,"threshold":..}
+        # необязательная подгонка: <файл>.align.json
+        #   {"scale":..,"dx":..,"dy":..,"threshold":..,"chroma":"FF00FF","chromaTol":60}
+        # threshold — порог кеинга чёрного фона от краёв (-1 = выключить).
+        # chroma/chromaTol — цвет-маркер (RRGGBB) и допуск для вырезания
+        # ЗАМКНУТЫХ внутренних дыр (командная карта, гнёзда портретов),
+        # запертых рамкой: заливка от краёв туда не доходит.
         $adjScale = 1.0; $adjDx = 0; $adjDy = 0; $thr = 12
+        $chroma = $null; $chromaTol = 60
         $sidecar = "$($png.FullName).align.json"
         if (Test-Path $sidecar) {
             $j = Get-Content $sidecar -Raw | ConvertFrom-Json
             if ($j.scale)              { $adjScale = [double]$j.scale }
             if ($null -ne $j.dx)       { $adjDx = [int]$j.dx }
             if ($null -ne $j.dy)       { $adjDy = [int]$j.dy }
-            if ($j.threshold)          { $thr = [int]$j.threshold }
+            if ($null -ne $j.threshold){ $thr = [int]$j.threshold }
+            if ($j.chroma)             { $chroma = [Convert]::ToInt32(($j.chroma -replace '[^0-9A-Fa-f]',''), 16) }
+            if ($null -ne $j.chromaTol){ $chromaTol = [int]$j.chromaTol }
         }
 
-        # 1) пользовательский арт: вырезаем фон заливкой от краёв
+        # 1) пользовательский арт: вырезаем фон заливкой от краёв, затем
+        #    (если задан) цвет-маркер внутренних дыр — везде.
         $userBmpRaw = New-Object System.Drawing.Bitmap($png.FullName)
         $uw = $userBmpRaw.Width; $uh = $userBmpRaw.Height
         $ubuf = Get-BitmapBuffer $userBmpRaw
         $userBmpRaw.Dispose()
         $removed = [TexAlign]::KeyBackground($ubuf, $uw, $uh, $thr)
+        if ($null -ne $chroma) {
+            $removedC = [TexAlign]::KeyChroma($ubuf, $uw, $uh, $chroma, $chromaTol)
+            $removed += $removedC
+            Write-Host ("       chroma-key #{0:X6} ±{1}: вырезано внутренних дыр {2} пикс." -f $chroma, $chromaTol, $removedC) -ForegroundColor DarkGray
+        }
         $ub = [TexAlign]::BBoxAlpha($ubuf, $uw, $uh)
         if ($ub[2] -lt 0) {
             Write-Host "  [!!] $race\$name.png — после вырезания фона не осталось арта (порог $thr)" -ForegroundColor Red
