@@ -1,53 +1,53 @@
 ﻿# ============================================================
 #  Dawn of War (Anniversary Edition) - Mod Backend
-#  Бэкенд для графического менеджера (DoW-ModManager.exe) и
-#  консольного использования. Настройки — launcher-settings.json.
+#  Backend for the graphical manager (DoW-ModManager.exe) and for
+#  console use. Settings live in launcher-settings.json.
 #
-#  ВАЖНО: widescreen ставится ДИСКОВЫМ патчем (файлы игры правятся
-#  с полным бэкапом в <игра>\_widescreen_backup). Благодаря этому
-#  после «Применить» игра запускается ОБЫЧНЫМ способом из Steam —
-#  никакой лаунчер при запуске больше не нужен.
+#  IMPORTANT: widescreen is applied as an ON-DISK patch (game files are
+#  edited, with a full backup in <game>\_widescreen_backup). That is what
+#  lets the game start the ORDINARY way from Steam after Apply - no
+#  launcher is needed at play time.
 #
-#  Возможности:
-#   - выбор папки с игрой (автопоиск или вручную);
-#   - widescreen под заданное разрешение + нерастянутый UI (комплект);
-#   - текстуры баров: дорисованные (textures-custom) / жёсткая обрезка;
-#   - улучшенный зум (DistMax);
-#   - русский язык (установка русификатора из архива + [lang:russian]);
-#   - определение уже применённых изменений (-Status);
-#   - полный откат.
+#  Features:
+#   - game folder selection (auto-detected or manual);
+#   - widescreen for a chosen resolution plus the unstretched UI;
+#   - bar textures: repainted (textures-custom) or hard-cut;
+#   - extended camera zoom (DistMax);
+#   - Russian language (install the pack from an archive + [lang:russian]);
+#   - detection of what is already installed (-Status);
+#   - full rollback.
 #
-#  Режимы:
-#    .\DoW-Launcher.ps1 -Status       — JSON с текущим состоянием игры
-#    .\DoW-Launcher.ps1 -Apply        — применить настройки
-#    .\DoW-Launcher.ps1 -Launch       — применить и запустить игру
-#    .\DoW-Launcher.ps1 -LaunchOnly   — просто запустить игру (без применения)
-#    .\DoW-Launcher.ps1 -RestoreAll   — полный откат
+#  Modes:
+#    .\DoW-Launcher.ps1 -Status       - JSON with the current game state
+#    .\DoW-Launcher.ps1 -Apply        - apply the settings
+#    .\DoW-Launcher.ps1 -Launch       - apply the settings and start the game
+#    .\DoW-Launcher.ps1 -LaunchOnly   - just start the game, applying nothing
+#    .\DoW-Launcher.ps1 -RestoreAll   - full rollback
 # ============================================================
 
 param(
     [switch]$Apply,
     [switch]$Launch,
-    [switch]$LaunchOnly,           # просто запустить игру, без применения настроек
+    [switch]$LaunchOnly,           # just start the game, without applying settings
     [switch]$RestoreAll,
     [switch]$Status,
-    [switch]$LocaleInfo,           # диагностика: какие локали реально стоят в игре
+    [switch]$LocaleInfo,           # diagnostics: which locales are really installed
     [string]$GamePath = '',
-    [string]$RussianArchive = ''   # архив русификатора (zip/rar/7z) для установки
+    [string]$RussianArchive = ''   # localisation archive (zip/rar/7z) to install
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $cfgPath = Join-Path $root 'launcher-settings.json'
 
-# ---------- Настройки ----------
+# ---------- Settings ----------
 $S = [ordered]@{
     GamePath       = ''
     Game           = 'W40k'   # W40k | WA
     Width          = 3440
     Height         = 1440
-    Widescreen     = $true    # патч отрисовки + UI (единый комплект)
-    TexturesCustom = $true    # true = дорисованные, false = жёсткая обрезка
+    Widescreen     = $true    # rendering patch + UI, installed as one bundle
+    TexturesCustom = $true    # true = repainted art, false = hard-cut slices
     Zoom           = $true
     DistMax        = 76
     Russian        = $false
@@ -74,7 +74,7 @@ function Write-Log([string]$msg, [string]$color = 'Gray') {
     }
 }
 
-# ---------- Поиск папки с игрой ----------
+# ---------- Locate the game folder ----------
 function Find-GamePath {
     $candidates = @(
         "C:\Program Files (x86)\Steam\steamapps\common\Dawn of War Gold",
@@ -85,9 +85,9 @@ function Find-GamePath {
         "E:\Steam\steamapps\common\Dawn of War Gold",
         "E:\SteamLibrary\steamapps\common\Dawn of War Gold"
     )
-    # Join-Path бросает исключение, если диска из кандидата нет в системе
-    # (а при ErrorActionPreference='Stop' это роняло весь скрипт на машинах
-    # без диска E:). Поэтому склеиваем строкой, а не Join-Path.
+    # Join-Path raises when a candidate's drive does not exist, and with
+    # ErrorActionPreference='Stop' that aborted the whole script on machines
+    # without an E: drive. Concatenate strings instead.
     foreach ($c in $candidates) {
         if (Test-Path -LiteralPath ($c.TrimEnd('\') + '\W40k.exe')) { return $c }
     }
@@ -124,13 +124,11 @@ function Get-EngineDir([string]$gp) {
     return (Join-Path $gp 'Engine')
 }
 
-# ---------- Определение текущего состояния игры ----------
-# Читает реальные факты с диска, а не только наш конфиг: если мод
-# ---------- Локали ----------
-# Возвращает хеш: имя локали -> @{ Name; Paths; Ucs; Sga; Files }.
-# Локали лежат в <игра>\<модуль>\Locale\<Язык>\ (W40k, WXP, DXP2, Engine)
-# и/или в <игра>\Locale\<Язык>\. Сканируем только эти места — полный
-# рекурсивный обход папки игры был медленным и всё равно неточным.
+# ---------- Locales ----------
+# Returns a hash: locale name -> @{ Name; Paths; Ucs; Sga; Files }.
+# Locales live in <game>\<module>\Locale\<Language>\ (W40k, WXP, DXP2,
+# Engine) and/or in <game>\Locale\<Language>\. Only those places are
+# scanned: recursing over the whole game folder was slow and inaccurate.
 function Get-LocaleState([string]$gp) {
     $res = @{}
     if (-not $gp -or -not (Test-Path $gp)) { return $res }
@@ -157,9 +155,10 @@ function Get-LocaleState([string]$gp) {
     return $res
 }
 
-# Локаль считается пригодной, только если в ней есть реальное содержимое
-# (.ucs с текстами и/или .sga). Пустая папка Locale\Russian — не русификатор:
-# именно на такой movie игра и вылетала, когда язык переключали на неё.
+# A locale counts as usable only when it actually holds content (.ucs text
+# files and/or .sga). An empty Locale\Russian folder is not an installed
+# localisation: pointing the language at one of those is exactly what made
+# the game crash.
 function Get-UsableLocales($localeState) {
     $out = @()
     foreach ($k in $localeState.Keys) {
@@ -169,7 +168,9 @@ function Get-UsableLocales($localeState) {
     return ($out | Sort-Object)
 }
 
-# (или русификатор) поставлен раньше/вручную — это будет видно.
+# ---------- Detect the current game state ----------
+# Reads the facts off disk rather than trusting our own config, so a mod
+# (or a localisation) installed earlier or by hand still shows up.
 function Get-Status([string]$gp) {
     $st = [ordered]@{
         GamePath          = $gp
@@ -180,16 +181,16 @@ function Get-Status([string]$gp) {
         TexturesCustom    = $false
         ZoomInstalled     = $false
         DistMax           = 0
-        LocaleRussian     = $false   # файлы русификатора реально лежат в игре
-        LocaleEnglish     = $false   # английская локаль на месте (нужна для отката языка)
-        LocalesFound      = ''       # список найденных локалей через запятую
-        LangRussian       = $false   # в W40k.ini стоит [lang:russian]
+        LocaleRussian     = $false   # localisation files are really present in the game
+        LocaleEnglish     = $false   # English locale present (needed to switch back)
+        LocalesFound      = ''       # comma-separated list of the locales found
+        LangRussian       = $false   # W40k.ini carries [lang:russian]
         BackupExists      = $false
     }
     if (-not $gp -or -not (Test-Path (Join-Path $gp 'W40k.exe'))) { return $st }
     $engineDir = Get-EngineDir $gp
 
-    # widescreen: в пропатченной Platform.dll не остаётся константы 4:3
+    # widescreen: a patched Platform.dll no longer holds the 4:3 constant
     $plat = Join-Path $gp 'Platform.dll'
     if (Test-Path $plat) {
         try {
@@ -203,7 +204,7 @@ function Get-Status([string]$gp) {
     }
     $st.BackupExists = Test-Path (Join-Path $gp '_widescreen_backup')
 
-    # разрешение — из Local.ini
+    # resolution comes from Local.ini
     $ini = Join-Path $gp 'Local.ini'
     if (Test-Path $ini) {
         $txt = Get-Content $ini -Raw
@@ -211,12 +212,12 @@ function Get-Status([string]$gp) {
         if ($txt -match '(?im)^\s*screenheight\s*=\s*(\d+)') { $st.Height = [int]$Matches[1] }
     }
 
-    # UI-мод — по манифесту установки
+    # UI mod: detected by its install manifest
     $st.UiInstalled = Test-Path (Join-Path $engineDir 'Data\ui-unstretch-manifest.txt')
-    # какие текстуры стоят — по маркеру, который пишет Apply
+    # which texture set is installed: by the marker Apply writes
     $st.TexturesCustom = Test-Path (Join-Path $engineDir 'Data\ui-textures-custom.marker')
 
-    # зум — по loose-файлу камеры
+    # zoom: by the loose camera file
     $cam = Join-Path $engineDir 'Data\camera_high.lua'
     if (Test-Path $cam) {
         $st.ZoomInstalled = $true
@@ -224,7 +225,7 @@ function Get-Status([string]$gp) {
         if ($ct -match '(?im)^\s*DistMax\s*=\s*([\d\.]+)') { $st.DistMax = [double]$Matches[1] }
     }
 
-    # русификатор: какие локали РЕАЛЬНО стоят в игре (с содержимым)
+    # localisation: which locales are REALLY installed (with content)
     $loc = Get-LocaleState $gp
     $usable = @(Get-UsableLocales $loc)
     $st.LocalesFound  = ($usable -join ', ')
@@ -239,7 +240,7 @@ function Get-Status([string]$gp) {
     return $st
 }
 
-# ---------- Дочерние скрипты ----------
+# ---------- Child scripts ----------
 function Invoke-Child([string]$script, [hashtable]$scriptArgs) {
     $path = Join-Path $root $script
     if (-not (Test-Path $path)) { Write-Log "[!] Не найден $script" 'Red'; return }
@@ -251,9 +252,9 @@ function Invoke-Child([string]$script, [hashtable]$scriptArgs) {
     }
 }
 
-# ---------- Русификатор ----------
-# Ищет распаковщик: 7-Zip (реестр, PATH, типовые папки), затем WinRAR.
-# 7-Zip умеет всё (zip/rar/7z), WinRAR — запасной вариант.
+# ---------- Localisation ----------
+# Finds an extractor: 7-Zip (registry, PATH, usual folders), then WinRAR.
+# 7-Zip handles everything (zip/rar/7z); WinRAR is the fallback.
 function Find-Extractor {
     $cands = New-Object System.Collections.Generic.List[string]
     foreach ($rk in @('HKLM:\SOFTWARE\7-Zip','HKLM:\SOFTWARE\WOW6432Node\7-Zip','HKCU:\SOFTWARE\7-Zip')) {
@@ -281,10 +282,11 @@ function Find-Extractor {
     return $null
 }
 
-# Распаковывает архив русификатора и раскладывает его по папке игры.
-# Архивы часто завёрнуты в лишнюю папку ("Русификатор\W40k\..."), поэтому
-# сначала распаковываем во временный каталог, находим уровень, на котором
-# лежат папки модулей игры (W40k/Engine/Locale/...), и копируем уже оттуда.
+# Unpacks a localisation archive and lays it out over the game folder.
+# Such archives are often wrapped in a redundant top directory, so the
+# archive is extracted to a temporary folder first, the level holding the
+# game module folders (W40k/Engine/Locale/...) is located, and only then is
+# the content copied from there.
 function Install-RussianArchive([string]$gp, [string]$archive) {
     if (-not (Test-Path $archive)) { Write-Log "[!] Архив русификатора не найден: $archive" 'Red'; return $false }
     Write-Log "Устанавливаю русификатор из архива: $archive" 'Cyan'
@@ -314,7 +316,7 @@ function Install-RussianArchive([string]$gp, [string]$archive) {
             return $false
         }
 
-        # найти уровень с папками игры (снять лишнюю обёртку)
+        # find the level holding the game folders, stripping the wrapper
         $src = $tmp
         for ($i = 0; $i -lt 4; $i++) {
             $hasGameDirs = @(Get-ChildItem $src -Directory -ErrorAction SilentlyContinue |
@@ -349,10 +351,11 @@ function Set-GameLanguage([string]$gp, [bool]$russian) {
         return
     }
 
-    # ЗАЩИТА ОТ ВЫЛЕТА. Движок падает на старте, если [lang:X] указывает на
-    # локаль, которой в игре нет. Классический случай: русификатор заменил
-    # английскую локаль, потом язык вернули на english — и игра вылетела.
-    # Поэтому переключаем только на локаль, которая реально есть с содержимым.
+    # CRASH GUARD. The engine dies at startup when [lang:X] points at a
+    # locale the game does not have. The classic case: the localisation
+    # replaced the English locale, the language was later set back to
+    # english, and the game crashed. So switch only to a locale that is
+    # really present and has content.
     $usable = @(Get-UsableLocales (Get-LocaleState $gp))
     if ($usable.Count -eq 0) {
         Write-Log "[!] В игре не найдено ни одной локали с содержимым — язык не трогаю (иначе игра вылетит)." 'Red'
@@ -393,7 +396,7 @@ function Restore-GameLanguage([string]$gp) {
     }
 }
 
-# ---------- Применение настроек ----------
+# ---------- Apply the settings ----------
 function Apply-Settings {
     $gp = Resolve-GamePath
     if (-not $gp) { Write-Log "[!] Папка игры не найдена — укажите её и повторите." 'Red'; return $false }
@@ -403,7 +406,7 @@ function Apply-Settings {
     $marker = Join-Path $engineDir 'Data\ui-textures-custom.marker'
 
     if ($S.Widescreen) {
-        # Дисковый патч: после него игра запускается из Steam как обычно
+        # On-disk patch: afterwards the game starts from Steam as usual
         Write-Log "-- Widescreen: патчу файлы игры на диске ($($S.Width)x$($S.Height), exe: $($S.ExeMode))..." 'Cyan'
         Invoke-Child 'widescreen\DoW-Widescreen-Patcher.ps1' @{ Width = [int]$S.Width; Height = [int]$S.Height; ExeMode = [string]$S.ExeMode; GamePath = $gp }
 
@@ -468,7 +471,7 @@ function Restore-Everything {
     Invoke-Child 'ui-unstretch\Install-UnstretchedUI.ps1' @{ Restore = $true; GamePath = $gp }
     Invoke-Child 'camera-zoom\Install-CameraZoom.ps1' @{ Restore = $true; GamePath = $gp }
     Restore-GameLanguage $gp
-    # добираем файлы, добавленные мимо манифеста (папки пишут только наши моды)
+    # sweep files added outside the manifest (only our mods write these folders)
     $engineDir = Get-EngineDir $gp
     foreach ($sub in @('Data\art\ui\textures\taskbar', 'Data\art\ui\screens')) {
         $p = Join-Path $engineDir $sub
@@ -480,7 +483,7 @@ function Restore-Everything {
     Write-Log "Примечание: файлы русификатора (если ставились) не удаляются — только язык в W40k.ini возвращён на английский." 'DarkGray'
 }
 
-# ---------- Точка входа ----------
+# ---------- Entry point ----------
 if ($Status) {
     $gp = Resolve-GamePath
     Get-Status $gp | ConvertTo-Json -Compress
@@ -512,7 +515,7 @@ if ($LocaleInfo) {
     exit 0
 }
 if ($RestoreAll) { Restore-Everything; exit 0 }
-if ($LaunchOnly) { Launch-Game; exit 0 }   # запуск без применения настроек
+if ($LaunchOnly) { Launch-Game; exit 0 }   # start the game without applying settings
 if ($Apply -or $Launch) {
     $ok = Apply-Settings
     if ($Launch -and $ok) { Launch-Game }
