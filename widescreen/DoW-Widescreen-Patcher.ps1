@@ -1,15 +1,15 @@
 ﻿# ============================================================
 #  Dawn of War (Anniversary Edition) - Widescreen Patcher
-#  Расширяет обзор под любое разрешение (по умолч. 3440x1440)
-#  Использование (обычный запуск):
+#  Widens the field of view for any resolution (default 3440x1440)
+#  Usage (normal run):
 #      .\DoW-Widescreen-Patcher.ps1
-#  Другое разрешение:
+#  Other resolution:
 #      .\DoW-Widescreen-Patcher.ps1 -Width 2560 -Height 1080
-#  Режимы патча exe (влияет на мини-карту, см. README):
-#      -ExeMode skip        (по умолчанию: exe не трогаем)
-#      -ExeMode compromise  (exe -> 1.25, компромисс для мини-карты)
-#      -ExeMode full        (exe -> полное соотношение, мир может растянуться)
-#  Откат к оригиналу:
+#  exe patch modes (affects the minimap, see README):
+#      -ExeMode skip        (default: leave the exe alone)
+#      -ExeMode compromise  (exe -> 1.25, a compromise for the minimap)
+#      -ExeMode full        (exe -> real aspect, the world may stretch)
+#  Rollback to the original:
 #      .\DoW-Widescreen-Patcher.ps1 -Restore
 # ============================================================
 
@@ -24,7 +24,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-# ---------- Быстрый поиск/замена байтов через C# ----------
+# ---------- Fast byte search/replace via C# ----------
 Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
@@ -59,7 +59,7 @@ public static class BytePatcher {
 }
 "@
 
-# ---------- Поиск папки с игрой ----------
+# ---------- Locate the game folder ----------
 function Find-GamePath {
     $candidates = @(
         "C:\Program Files (x86)\Steam\steamapps\common\Dawn of War Gold",
@@ -73,7 +73,7 @@ function Find-GamePath {
     foreach ($c in $candidates) {
         if (Test-Path (Join-Path $c 'W40k.exe')) { return $c }
     }
-    # Поиск через реестр Steam -> libraryfolders.vdf
+    # Fall back to the Steam registry key -> libraryfolders.vdf
     try {
         $steam = (Get-ItemProperty 'HKCU:\Software\Valve\Steam' -ErrorAction Stop).SteamPath
         if ($steam) {
@@ -110,7 +110,7 @@ $DllFiles  = @('Platform.dll','spDx9.dll','UserInterface.dll')
 $ExeFiles  = @('W40k.exe','W40kWA.exe')
 $AllFiles  = $DllFiles + $ExeFiles
 
-# ---------- Режим отката ----------
+# ---------- Rollback mode ----------
 if ($Restore) {
     if (-not (Test-Path $BackupDir)) {
         Write-Host "Папка с резервными копиями не найдена ($BackupDir)." -ForegroundColor Red
@@ -129,7 +129,7 @@ if ($Restore) {
     exit 0
 }
 
-# ---------- Вычисление hex-значений ----------
+# ---------- Compute the hex values ----------
 $OrigBytes = [byte[]](0xAB,0xAA,0xAA,0x3F)                          # float 1.3333 (4:3)
 $AspectVal = [float]($Width / $Height)
 $NewBytes  = [BitConverter]::GetBytes($AspectVal)                    # little-endian
@@ -139,7 +139,7 @@ $hexNew = ($NewBytes | ForEach-Object { $_.ToString('X2') }) -join ' '
 Write-Host ("Разрешение: {0}x{1}  |  соотношение = {2:N4}  |  hex: {3}" -f $Width,$Height,$AspectVal,$hexNew) -ForegroundColor Cyan
 Write-Host "Режим exe: $ExeMode`n"
 
-# ---------- Резервные копии (только один раз, оригиналы) ----------
+# ---------- Backups (taken once, from the pristine originals) ----------
 if (-not (Test-Path $BackupDir)) { New-Item -ItemType Directory -Path $BackupDir | Out-Null }
 foreach ($f in $AllFiles + @('Local.ini')) {
     $src = Join-Path $GamePath $f
@@ -150,7 +150,7 @@ foreach ($f in $AllFiles + @('Local.ini')) {
     }
 }
 
-# ---------- Функция патча одного файла ----------
+# ---------- Patch a single file ----------
 function Patch-File([string]$name, [byte[]]$replBytes) {
     $path = Join-Path $GamePath $name
     if (-not (Test-Path $path)) {
@@ -173,8 +173,8 @@ function Patch-File([string]$name, [byte[]]$replBytes) {
     }
 }
 
-# ---------- Восстановление оригиналов из бэкапа перед патчем ----------
-# (чтобы повторные запуски с другим разрешением/режимом работали корректно)
+# ---------- Restore originals from backup before patching ----------
+# (so re-runs with a different resolution or mode start from clean files)
 foreach ($f in $AllFiles) {
     $src = Join-Path $BackupDir $f
     $dst = Join-Path $GamePath $f
@@ -211,7 +211,7 @@ if (Test-Path $ini) {
     if ($txt -notmatch '(?im)^\s*screenwidth')  { $txt += "`r`nscreenwidth=$Width" }
     if ($txt -notmatch '(?im)^\s*screenheight') { $txt += "`r`nscreenheight=$Height" }
     Set-Content -Path $ini -Value $txt -Encoding ASCII
-    # Ставим "только чтение", чтобы игра не сбросила разрешение из меню настроек
+    # Mark read-only so the game cannot reset the resolution from its own menu
     Set-ItemProperty $ini -Name IsReadOnly -Value $true
     Write-Host "`nLocal.ini: разрешение ${Width}x${Height} прописано, файл защищён от перезаписи (read-only)." -ForegroundColor Green
 } else {

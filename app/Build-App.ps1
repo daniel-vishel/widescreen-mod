@@ -1,10 +1,11 @@
 ﻿# ============================================================
-#  Сборка DoW-ModManager.exe из app\DowModManager.cs
-#  Использует системный компилятор .NET Framework 4.x (csc.exe) —
-#  установка каких-либо SDK не требуется. Готовый .exe кладётся в
-#  КОРЕНЬ репозитория (рядом с DoW-Launcher.ps1 и папками модов).
+#  Build DoW-ModManager.exe from app\DowModManager.cs
+#  Uses the .NET Framework 4.x compiler (csc.exe) that ships with
+#  Windows, so no SDK has to be installed. The resulting .exe is
+#  placed in the REPOSITORY ROOT, next to DoW-Launcher.ps1 and the
+#  mod folders.
 #
-#  Запуск:  powershell -ExecutionPolicy Bypass -File app\Build-App.ps1
+#  Run:  powershell -ExecutionPolicy Bypass -File app\Build-App.ps1
 # ============================================================
 param(
     [switch]$SelfTest   # после сборки прогнать DoW-ModManager.exe --selftest
@@ -17,7 +18,7 @@ $src    = Join-Path $appDir 'DowModManager.cs'
 $out    = Join-Path $repo   'DoW-ModManager.exe'
 $icon   = Join-Path $appDir 'app.ico'
 
-# csc из .NET Framework 4.x (есть на всех Windows 10/11)
+# csc from .NET Framework 4.x (present on every Windows 10/11)
 $csc = Get-ChildItem 'C:\Windows\Microsoft.NET\Framework64' -Filter csc.exe -Recurse -ErrorAction SilentlyContinue |
        Where-Object { $_.DirectoryName -match 'v4\.' } |
        Sort-Object FullName -Descending | Select-Object -First 1

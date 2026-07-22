@@ -1,42 +1,43 @@
 ﻿# ============================================================
 #  Dawn of War (Anniversary Edition) - Increased Fog Distance
-#  Дистанция тумана и радиус неба для карт кампании.
+#  Fog distance and sky radius for the campaign maps.
 #
-#  ЗАЧЕМ. Дистанционный туман карты откалиброван под ванильный
-#  отвод камеры (DistMax = 38). При большем отводе (camera-zoom)
-#  объекты выходят за fog end и затягиваются дымкой — высокий обзор
-#  становится бесполезен. Фикс отодвигает туман, НЕ выключая его:
-#  атмосфера сохраняется, но юниты и здания остаются видимыми.
+#  WHY. A map's distance fog is calibrated for the stock camera
+#  distance (DistMax = 38). Zoomed out further (camera-zoom), objects
+#  fall past fog end and wash out into haze, which makes the high view
+#  useless. This fix pushes the fog back WITHOUT disabling it: the
+#  atmosphere stays, but units and buildings remain visible.
 #
-#  ГДЕ ЛЕЖИТ. Карты кампании — <игра>\W40k\...\scenarios\sp\*.sgb,
-#  формат Relic Chunky. Внутри, в FOLD SCEN > FOLD WSTC > FOLD TERR:
-#    DATA EFFC — атмосфера: 2 цвета, 2 нуля, затем float дистанции
-#                тумана на смещении +40, далее цвет тумана и блок воды;
-#    DATA HRZN — небо: uint32 nameLen | имя (WH_SKY_01) | float радиуса
-#                неба | byte.
-#  Обе правки — перезапись float НА МЕСТЕ, размеры чанков не меняются.
+#  WHERE. Campaign maps live in <game>\W40k\...\scenarios\sp\*.sgb,
+#  in the Relic Chunky format. Under FOLD SCEN > FOLD WSTC > FOLD TERR:
+#    DATA EFFC - atmosphere: two colours, two zeroes, then the fog
+#                distance float at offset +40, then the fog colour
+#                and a water block;
+#    DATA HRZN - sky: uint32 nameLen | name (WH_SKY_01) | sky radius
+#                float | byte.
+#  Both edits overwrite a float IN PLACE, so chunk sizes never change.
 #
-#  ОРИГИНАЛЫ НЕ ИЗМЕНЯЮТСЯ: карты читаются из вашего .sga, патчатся в
-#  памяти и кладутся loose-файлами в <игра>\W40k\Data\scenarios\sp\.
-#  Движок читает loose поверх архива (тот же приём, что в camera-zoom).
-#  Откат (-Restore) удаляет loose-файлы по манифесту — возвращаются
-#  ванильные карты из архива.
+#  ORIGINALS ARE NOT MODIFIED: maps are read from your own .sga,
+#  patched in memory and written as loose files into <game>\W40k\Data\scenarios\sp\.
+#  The engine reads loose files over the archive, the same trick
+#  camera-zoom uses. Rollback (-Restore) deletes the loose files listed
+#  in the manifest, bringing the vanilla maps from the archive back.
 #
-#  ВАЖНО ПРО СЕЙВЫ. Сохранение кампании ссылается на данные карты,
-#  поэтому при активном фиксе старые сейвы могут не запускаться
-#  (об этом же предупреждают авторы аналогичных модов). Здесь это
-#  ОБРАТИМО: -Restore возвращает ванильные карты, и старые сейвы
-#  снова открываются. Рекомендация прежняя — ставить на новую кампанию.
+#  IMPORTANT, SAVES. A campaign save references map data, so with the
+#  fix active older saves may refuse to load - the authors of similar
+#  mods warn about the same thing. Here it is REVERSIBLE: -Restore
+#  brings the vanilla maps back and the old saves open again. The
+#  recommendation still stands: enable it on a fresh campaign.
 #
-#  Использование:
+#  Usage:
 #      .\Install-FogDistance.ps1                        # 1000 / 512
 #      .\Install-FogDistance.ps1 -FogDistance 1500 -SkyRadius 700
-#      .\Install-FogDistance.ps1 -Restore               # откат
+#      .\Install-FogDistance.ps1 -Restore               # rollback
 # ============================================================
 
 param(
-    [double]$FogDistance = 1000.0,   # дистанция тумана (ванильная — своя у каждой карты)
-    [double]$SkyRadius   = 512.0,    # радиус небесного купола
+    [double]$FogDistance = 1000.0,   # fog distance (stock value differs per map)
+    [double]$SkyRadius   = 512.0,    # sky dome radius
     [string]$GamePath    = '',
     [switch]$Restore
 )
@@ -44,7 +45,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 
-# ---------- C#: чтение SGA v2 + парсер Relic Chunky ----------
+# ---------- C#: SGA v2 reader + Relic Chunky parser ----------
 Add-Type -TypeDefinition @"
 using System;
 using System.Collections.Generic;
@@ -121,9 +122,9 @@ public static class SgaV2R3 {
     }
 }
 
-// ----- Relic Chunky: поиск DATA-чанков -----
-// Заголовок файла: "Relic Chunky\r\n\x1a\x00" (16 б) + version + platform (8 б),
-// чанки начинаются с 0x18. Заголовок чанка:
+// ----- Relic Chunky: locate DATA chunks -----
+// File header: "Relic Chunky\r\n\x1a\x00" (16 b) + version + platform (8 b),
+// so chunks start at 0x18. Chunk header:
 //   char[4] kind (FOLD|DATA) | char[4] type | u32 version | u32 size | u32 nameLen | char[nameLen] name
 public static class Chunky {
     public static int Find(byte[] d, string type) {
@@ -150,7 +151,7 @@ public static class Chunky {
 }
 "@
 
-# ---------- Поиск папки с игрой ----------
+# ---------- Locate the game folder ----------
 function Find-GamePath {
     $candidates = @(
         "C:\Program Files (x86)\Steam\steamapps\common\Dawn of War Gold",
@@ -201,7 +202,7 @@ if (-not (Test-Path $moduleDir)) {
 $installDir = Join-Path $moduleDir 'Data\scenarios\sp'
 $manifest   = Join-Path $moduleDir 'Data\fog-distance-manifest.txt'
 
-# ---------- Откат ----------
+# ---------- Rollback ----------
 if ($Restore) {
     if (Test-Path $manifest) {
         $n = 0
@@ -217,11 +218,11 @@ if ($Restore) {
     exit 0
 }
 
-# ---------- Патч ----------
+# ---------- Patch ----------
 Write-Host ("Дистанция тумана: {0} | радиус неба: {1}" -f `
     $FogDistance.ToString('0.#', $inv), $SkyRadius.ToString('0.#', $inv)) -ForegroundColor Cyan
 
-# Патчит буфер карты на месте. Возвращает строку-отчёт или $null, если чанки не найдены.
+# Patches a map buffer in place. Returns a report string, or $null if chunks are missing.
 function Patch-MapBuffer([byte[]]$d, [string]$label) {
     $effc = [Chunky]::Find($d, 'EFFC')
     $hrzn = [Chunky]::Find($d, 'HRZN')
@@ -229,13 +230,13 @@ function Patch-MapBuffer([byte[]]$d, [string]$label) {
         Write-Host "  [..] $label — нет EFFC/HRZN, пропуск" -ForegroundColor Yellow
         return $null
     }
-    # EFFC: float дистанции тумана на +40
+    # EFFC: fog distance float at +40
     $fogOff = $effc + 40
     if ($fogOff + 4 -gt $d.Length) { Write-Host "  [!!] $label — EFFC обрезан" -ForegroundColor Red; return $null }
     $oldFog = [BitConverter]::ToSingle($d, $fogOff)
     [Array]::Copy([BitConverter]::GetBytes([float]$FogDistance), 0, $d, $fogOff, 4)
 
-    # HRZN: uint32 nameLen | имя | float радиуса неба
+    # HRZN: uint32 nameLen | name | sky radius float
     $nameLen = [BitConverter]::ToUInt32($d, $hrzn)
     if ($nameLen -gt 256) { Write-Host "  [!!] $label — подозрительная длина имени неба ($nameLen)" -ForegroundColor Red; return $null }
     $skyName = [Text.Encoding]::ASCII.GetString($d, $hrzn + 4, [int]$nameLen)
@@ -249,7 +250,7 @@ function Patch-MapBuffer([byte[]]$d, [string]$label) {
         $skyName, $oldSky.ToString('0.#', $inv), $SkyRadius.ToString('0.#', $inv))
 }
 
-# Источник карт: сначала .sga в модуле W40k, иначе уже лежащие loose-файлы
+# Map source: the .sga archives inside the W40k module
 $maps = @()   # @{ Name; Data }
 $sgas = @(Get-ChildItem -Path $moduleDir -Filter '*.sga' -Recurse -ErrorAction SilentlyContinue)
 foreach ($sga in $sgas) {

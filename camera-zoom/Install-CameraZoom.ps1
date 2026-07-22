@@ -1,29 +1,29 @@
 ﻿# ============================================================
 #  Dawn of War (Anniversary Edition) - Camera Zoom Mod
-#  Увеличивает максимальный отвод камеры (зум колёсиком).
+#  Raises the maximum camera distance (mouse wheel zoom-out).
 #
-#  Принцип: движок читает loose-файлы из <игра>\Engine\Data
-#  ПОВЕРХ архива Engine.sga. Мы кладём туда свой camera_high.lua —
-#  ни один оригинальный файл игры не изменяется.
-#  Откат = удаление этого файла (-Restore).
+#  Mechanism: the engine reads loose files from <game>\Engine\Data
+#  OVER the Engine.sga archive, so dropping our own camera_high.lua
+#  there leaves every original game file untouched.
+#  Rollback = delete that one file (-Restore).
 #
-#  Совместимость с кампаниями: параметры камеры не хранятся в
-#  сейвах и не входят в данные модуля кампании (W40k/WXP), поэтому
-#  мод работает и на уже идущих кампаниях.
+#  Campaign compatibility: camera parameters are not stored in saves
+#  and are not part of the campaign module data (W40k/WXP), so the mod
+#  also applies to campaigns that are already in progress.
 #
-#  Использование:
-#      .\Install-CameraZoom.ps1                    # DistMax = 76 (2x от оригинала)
-#      .\Install-CameraZoom.ps1 -DistMax 100       # своя дальность
-#      .\Install-CameraZoom.ps1 -WheelSpeed 2.0    # ускорить зум колёсиком
-#      .\Install-CameraZoom.ps1 -Restore           # полный откат
+#  Usage:
+#      .\Install-CameraZoom.ps1                    # DistMax = 76 (2x stock)
+#      .\Install-CameraZoom.ps1 -DistMax 100       # custom distance
+#      .\Install-CameraZoom.ps1 -WheelSpeed 2.0    # faster wheel zoom
+#      .\Install-CameraZoom.ps1 -Restore           # full rollback
 #
-#  ВАЖНО: в настройках игры должна быть ВКЛЮЧЕНА полная 3D-камера
-#  (Full 3D Camera), иначе используется camera_low и мод не действует.
+#  IMPORTANT: Full 3D Camera must be ENABLED in the game graphics
+#  settings, otherwise camera_low is used and the mod has no effect.
 # ============================================================
 
 param(
-    [double]$DistMax = 76.0,       # макс. дальность камеры (оригинал: 38.0)
-    [double]$WheelSpeed = 0,       # скорость отвода колёсиком, 0 = не менять (оригинал: 1.45)
+    [double]$DistMax = 76.0,       # max camera distance (stock: 38.0)
+    [double]$WheelSpeed = 0,       # wheel zoom-out speed, 0 = leave as is (stock: 1.45)
     [string]$GamePath = '',
     [switch]$Restore
 )
@@ -31,7 +31,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $inv = [System.Globalization.CultureInfo]::InvariantCulture
 
-# ---------- Поиск папки с игрой ----------
+# ---------- Locate the game folder ----------
 function Find-GamePath {
     $candidates = @(
         "C:\Program Files (x86)\Steam\steamapps\common\Dawn of War Gold",
@@ -79,7 +79,7 @@ Write-Host "Папка игры: $GamePath" -ForegroundColor Cyan
 $EngineData = Join-Path $GamePath 'Engine\Data'
 $TargetFile = Join-Path $EngineData 'camera_high.lua'
 
-# ---------- Откат ----------
+# ---------- Rollback ----------
 if ($Restore) {
     if (Test-Path $TargetFile) {
         Remove-Item $TargetFile -Force
@@ -91,7 +91,7 @@ if ($Restore) {
     exit 0
 }
 
-# ---------- Проверки параметров ----------
+# ---------- Parameter sanity checks ----------
 if ($DistMax -lt 38) {
     Write-Host "[!] DistMax=$DistMax меньше оригинала (38) — камера станет БЛИЖЕ, а не дальше." -ForegroundColor Yellow
 }
@@ -99,7 +99,7 @@ if ($DistMax -gt 300) {
     Write-Host "[!] DistMax=$DistMax очень большой: на дальнем отводе карта тонет в тумане." -ForegroundColor Yellow
 }
 
-# ---------- Генерация файла из шаблона ----------
+# ---------- Generate the file from the template ----------
 $Template = Join-Path $PSScriptRoot 'template\camera_high.lua'
 if (-not (Test-Path $Template)) {
     Write-Host "Не найден шаблон $Template — запускайте скрипт из папки camera-zoom репозитория." -ForegroundColor Red
